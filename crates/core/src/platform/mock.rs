@@ -9,6 +9,8 @@ pub struct MockPlatformProvider {
     pub app_data: PathBuf,
     /// Test knob: report Claude Desktop as running.
     desktop_running: AtomicBool,
+    /// Test knob: fail process inspection instead of reporting an idle desktop.
+    fail_process_inspection: AtomicBool,
     /// Test knob: make `create_symlink` fail (to exercise rollback paths).
     fail_symlink: AtomicBool,
     /// Test knob: make `move_to_trash` fail (to exercise the no-fallback path).
@@ -31,6 +33,7 @@ impl MockPlatformProvider {
             cli_default,
             app_data,
             desktop_running: AtomicBool::new(false),
+            fail_process_inspection: AtomicBool::new(false),
             fail_symlink: AtomicBool::new(false),
             fail_trash: AtomicBool::new(false),
             running_args: std::sync::Mutex::new(Vec::new()),
@@ -49,6 +52,11 @@ impl MockPlatformProvider {
     /// Builder: make `is_claude_desktop_running` report `running`.
     pub fn with_desktop_running(self, running: bool) -> Self {
         self.desktop_running.store(running, Ordering::SeqCst);
+        self
+    }
+
+    pub fn with_process_inspection_failure(self) -> Self {
+        self.fail_process_inspection.store(true, Ordering::SeqCst);
         self
     }
 
@@ -141,6 +149,9 @@ impl PlatformProvider for MockPlatformProvider {
     }
 
     fn is_claude_desktop_running(&self) -> Result<bool> {
+        if self.fail_process_inspection.load(Ordering::SeqCst) {
+            return Err(CswError::Other("mock: process inspection failed".into()));
+        }
         Ok(self.desktop_running.load(Ordering::SeqCst))
     }
 

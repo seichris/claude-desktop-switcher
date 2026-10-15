@@ -309,7 +309,7 @@ async fn reveal_profile_dir(
         "cli" => profile.isolation.cli_config_dir,
         _ => return Err(format!("unknown dir kind: {which}")),
     };
-    std::process::Command::new("open")
+    std::process::Command::new("/usr/bin/open")
         .arg(&path)
         .spawn()
         .map(|_| ())
@@ -746,16 +746,17 @@ fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
-/// Open an https URL in the user's default browser. The footer only ever passes
-/// fixed GitHub URLs; we still reject any non-https scheme so the command can never
-/// open an arbitrary file or app. CSW itself makes no network requests — this only
+/// Open only this project's GitHub pages in the user's default browser.
+/// A native allowlist backs the footer's fixed destinations. CSW itself makes no network requests — this only
 /// hands the URL to the OS, which opens the browser.
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
-    if !url.starts_with("https://") {
-        return Err(format!("refused non-https url: {url}"));
+    if !url.starts_with("https://github.com/matsumotory/claude-desktop-switcher/")
+        && !url.starts_with("https://github.com/seichris/claude-desktop-switcher/")
+    {
+        return Err(format!("refused URL outside the project allowlist: {url}"));
     }
-    std::process::Command::new("open")
+    std::process::Command::new("/usr/bin/open")
         .arg(&url)
         .spawn()
         .map(|_| ())

@@ -1,0 +1,69 @@
+# Local security build
+
+This fork was reviewed against upstream version 0.24.6 at
+`5892992dead8f9596c5291d87b0259d0b494f650`. The local build has version
+`0.24.6-local.2` and bundle identifier `com.seichris.claude-desktop-switcher`.
+
+The source review found no explicit runtime credential exfiltration, Keychain
+access, telemetry or automatic updater. This is limited source evidence, not a
+guarantee about every dependency or an operating-system security boundary.
+Claude accounts still run as the same macOS user.
+
+## Changes before installation
+
+- Refuse duplication, deletion, purge and link repair while any Claude Desktop
+  instance runs, including a secondary environment. Process-inspection errors
+  propagate rather than being interpreted as no matching processes.
+- Keep CSW storage and copied directories private with mode 0700.
+- Reserve new profile directories exclusively. An unfinished directory may hold
+  another account's sign-in data and is refused rather than adopted. Validate
+  the sharing source first and publish metadata only after setup succeeds.
+- Skip symbolic links and special files throughout recursive copying. Refuse
+  symlinked profile roots and redirected stored profile identities/data paths.
+- Use absolute paths for native launch/process-inspection tools; restrict URL
+  opening to the project's GitHub paths and remove inline script permission.
+- Direct the update button to this fork. Upstream downloads do not contain these
+  local changes; inspect and rebuild future updates deliberately.
+
+## Build and use
+
+With Xcode command-line tools and the pinned Rust toolchain installed:
+
+```sh
+sh scripts/build-local-app.sh
+```
+
+This uses the committed lockfile, embeds the local frontend and creates an
+ad-hoc signed app in `target/release/bundle/macos`. It does not use an Apple
+Development/Developer ID private key, notarize, install or launch the app.
+An ad-hoc signature verifies the local bundle's consistency; it is not publisher
+identity or Apple notarization. Do not disable Gatekeeper globally.
+
+Create a **New environment** using **Separate everything** for each account and
+sign in through the official Claude app. Existing Claude remains the default.
+Do not use Duplicate to add a different account: it intentionally copies Desktop
+sign-in state. Quit every Claude Desktop instance before maintenance. External
+Claude Code sessions can also write profile files; close those before maintenance.
+These checks are not a transactional snapshot or protection against malicious
+same-user filesystem changes racing an operation.
+
+## Dependency check on 2026-10-15
+
+OSV's batch API was queried for all 454 registry package versions in Cargo.lock.
+The macOS normal/build graph contained 263 distinct package entries. The glib
+unsoundness advisory and proc-macro-error maintenance notice are outside that
+graph. Five included Unicode crates have unmaintained notices:
+unic-char-property, unic-char-range, unic-common, unic-ucd-ident and
+unic-ucd-version. No vulnerability match beyond those maintenance notices was
+returned for the macOS graph. This does not detect undisclosed vulnerabilities
+or prove dependency code is benign. API: https://google.github.io/osv.dev/post-v1-querybatch/
+
+Regression coverage includes orphaned sign-in trees, failed creation, top-level
+and managed-path sockets, a running secondary environment, external and
+dangling nested symlinks, both copy walkers, private directories, redirected
+TOML paths and a symlinked profile root. Use:
+
+```sh
+cargo test --locked --workspace --exclude csw-desktop
+cargo clippy --locked -p csw-core -p csw-cli --all-targets -- -D warnings
+```

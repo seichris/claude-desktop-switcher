@@ -1,7 +1,7 @@
 {
   "productName": "Claude-Desktop-Switcher",
-  "version": "0.24.6",
-  "identifier": "com.matsumotory.claude-desktop-switcher",
+  "version": "0.24.6-local.2",
+  "identifier": "com.seichris.claude-desktop-switcher",
   "build": {
     "frontendDist": "./ui"
   },
@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
     }
   },
   "bundle": {
