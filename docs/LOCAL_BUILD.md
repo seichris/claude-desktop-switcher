@@ -2,7 +2,7 @@
 
 This fork was reviewed against upstream version 0.24.6 at
 `5892992dead8f9596c5291d87b0259d0b494f650`. The local build has version
-`0.24.6-local.1` and bundle identifier `com.seichris.claude-desktop-switcher`.
+`0.24.6-local.2` and bundle identifier `com.seichris.claude-desktop-switcher`.
 
 The source review found no explicit runtime credential exfiltration, Keychain
 access, telemetry or automatic updater. This is limited source evidence, not a
@@ -15,6 +15,9 @@ Claude accounts still run as the same macOS user.
   instance runs, including a secondary environment. Process-inspection errors
   propagate rather than being interpreted as no matching processes.
 - Keep CSW storage and copied directories private with mode 0700.
+- Reserve new profile directories exclusively. An unfinished directory may hold
+  another account's sign-in data and is refused rather than adopted. Validate
+  the sharing source first and publish metadata only after setup succeeds.
 - Skip symbolic links and special files throughout recursive copying. Refuse
   symlinked profile roots and redirected stored profile identities/data paths.
 - Use absolute paths for native launch/process-inspection tools; restrict URL
@@ -55,7 +58,8 @@ unic-ucd-version. No vulnerability match beyond those maintenance notices was
 returned for the macOS graph. This does not detect undisclosed vulnerabilities
 or prove dependency code is benign. API: https://google.github.io/osv.dev/post-v1-querybatch/
 
-Regression coverage includes a running secondary environment, external and
+Regression coverage includes orphaned sign-in trees, failed creation, top-level
+and managed-path sockets, a running secondary environment, external and
 dangling nested symlinks, both copy walkers, private directories, redirected
 TOML paths and a symlinked profile root. Use:
 

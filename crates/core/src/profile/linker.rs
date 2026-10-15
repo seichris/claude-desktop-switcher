@@ -261,9 +261,9 @@ impl<'a> Linker<'a> {
             }
             SharingMode::Copy => {
                 if source.exists() && !source.is_symlink() {
-                    if is_directory {
+                    if is_directory && source.is_dir() {
                         self.copy_dir_all(source, target)?;
-                    } else {
+                    } else if !is_directory && source.is_file() {
                         fs::copy(source, target)?;
                     }
                 }

@@ -28,6 +28,24 @@ pub(crate) fn private_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Reserve a new profile name exclusively. Even an unfinished directory can
+/// contain another account's cookies; never adopt or overwrite it as "fresh".
+pub(crate) fn new_profile_dir(path: &Path, name: &str) -> Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            CswError::ProfileAlreadyExists(name.to_string())
+        } else {
+            CswError::Io(error)
+        }
+    })
+}
+
 /// Skip symbolic links and special files at every depth. In particular, never
 /// materialize an external file's contents in a duplicated account or copy.
 pub(crate) fn copy_directory(src: &Path, dst: &Path) -> Result<()> {

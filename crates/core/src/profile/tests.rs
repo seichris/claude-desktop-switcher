@@ -132,6 +132,126 @@ fn test_clone_profile_rejects_default_source() {
 }
 
 #[test]
+fn fresh_environment_refuses_an_orphaned_authentication_tree() {
+    let (provider, manager, _tmp) = setup_test_manager();
+    let orphan = provider.app_data_dir().join("profiles/recovered");
+    std::fs::create_dir_all(orphan.join("desktop-data")).unwrap();
+    let cookies = orphan.join("desktop-data/Cookies");
+    std::fs::write(&cookies, "another-account-session").unwrap();
+    assert!(matches!(
+        manager.create_profile("recovered", SharingConfig::default(), None),
+        Err(crate::error::CswError::ProfileAlreadyExists(_))
+    ));
+    assert!(!orphan.join("profile.toml").exists());
+    assert_eq!(
+        std::fs::read_to_string(cookies).unwrap(),
+        "another-account-session"
+    );
+}
+
+#[test]
+fn duplicate_refuses_an_existing_directory_without_metadata() {
+    let (provider, manager, _tmp) = setup_test_manager();
+    manager
+        .create_profile("source", SharingConfig::default(), None)
+        .unwrap();
+    let orphan = provider.app_data_dir().join("profiles/recovered");
+    std::fs::create_dir_all(orphan.join("desktop-data")).unwrap();
+    let cookies = orphan.join("desktop-data/Cookies");
+    std::fs::write(&cookies, "another-account-session").unwrap();
+    assert!(matches!(
+        manager.clone_profile("source", "recovered"),
+        Err(crate::error::CswError::ProfileAlreadyExists(_))
+    ));
+    assert!(!orphan.join("profile.toml").exists());
+    assert_eq!(
+        std::fs::read_to_string(cookies).unwrap(),
+        "another-account-session"
+    );
+}
+
+#[test]
+fn invalid_sharing_source_does_not_publish_a_new_environment() {
+    let (provider, manager, _tmp) = setup_test_manager();
+    let sharing = SharingConfig {
+        source: SharingSource {
+            profile: "missing".into(),
+        },
+        ..SharingConfig::default()
+    };
+    assert!(manager.create_profile("fresh", sharing, None).is_err());
+    assert!(!provider.app_data_dir().join("profiles/fresh").exists());
+    assert!(!manager.list_profiles().unwrap().contains(&"fresh".into()));
+}
+
+#[test]
+fn failed_link_setup_is_not_published_or_reused_as_a_fresh_profile() {
+    let tmp = tempdir().unwrap();
+    let desktop = tmp.path().join("desktop");
+    let cli = tmp.path().join("cli");
+    std::fs::create_dir_all(&desktop).unwrap();
+    std::fs::create_dir_all(&cli).unwrap();
+    std::fs::write(cli.join("CLAUDE.md"), "fixture rules").unwrap();
+    let provider = Arc::new(
+        MockPlatformProvider::new(desktop, cli, tmp.path().join("app")).with_symlink_failure(true),
+    );
+    let manager = ProfileManager::new(provider.clone()).unwrap();
+    assert!(
+        manager
+            .create_profile("failed", SharingConfig::share_settings_preset(), None)
+            .is_err()
+    );
+    let target = provider.app_data_dir().join("profiles/failed");
+    assert!(target.is_dir());
+    assert!(!target.join("profile.toml").exists());
+    assert!(!manager.list_profiles().unwrap().contains(&"failed".into()));
+    assert!(matches!(
+        manager.create_profile("failed", SharingConfig::default(), None),
+        Err(crate::error::CswError::ProfileAlreadyExists(_))
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn duplicate_skips_top_level_special_files() {
+    use std::os::unix::net::UnixListener;
+    let (_, manager, _tmp) = setup_test_manager();
+    let source = manager
+        .create_profile("source", SharingConfig::default(), None)
+        .unwrap();
+    // Short CLI-root path stays beneath macOS's Unix socket path limit.
+    let socket_path = source.isolation.cli_config_dir.join("ipc");
+    let _socket = UnixListener::bind(&socket_path).unwrap();
+    let copied = manager.clone_profile("source", "copy").unwrap();
+    assert!(std::fs::symlink_metadata(copied.isolation.cli_config_dir.join("ipc")).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_mode_skips_special_file_at_a_managed_file_path() {
+    use std::os::unix::net::UnixListener;
+    let (provider, manager, _tmp) = setup_test_manager();
+    let socket_path = provider.claude_cli_default_dir().join("settings.json");
+    let _socket = UnixListener::bind(socket_path).unwrap();
+    let _directory_socket =
+        UnixListener::bind(provider.claude_cli_default_dir().join("rules")).unwrap();
+    let sharing = SharingConfig {
+        cli_settings: SharingMode::Copy,
+        cli_rules: SharingMode::Copy,
+        ..SharingConfig::default()
+    };
+    let copied = manager.create_profile("copy", sharing, None).unwrap();
+    assert!(
+        !copied
+            .isolation
+            .cli_config_dir
+            .join("settings.json")
+            .exists()
+    );
+    assert!(!copied.isolation.cli_config_dir.join("rules").exists());
+}
+
+#[test]
 fn maintenance_refuses_a_running_secondary_profile_without_touching_data() {
     let tmp = tempdir().unwrap();
     let provider = Arc::new(

@@ -435,9 +435,8 @@ impl ProfileManager {
         let profile_dir = profiles_dir.join(name);
         let profile_toml = profile_dir.join("profile.toml");
 
-        if profile_toml.exists() {
-            return Err(CswError::ProfileAlreadyExists(name.to_string()));
-        }
+        // Validate the sharing input before reserving or publishing anything.
+        let source_profile = self.get_profile(&sharing.source.profile)?;
 
         let profile = Profile {
             profile: ProfileMeta {
@@ -456,13 +455,12 @@ impl ProfileManager {
             sharing,
         };
 
-        safe_fs::private_dir(&profile_dir)?;
-        config::save_profile(&profile, &profile_toml)?;
-
-        // Apply linking immediately
-        let source_profile = self.get_profile(&profile.sharing.source.profile)?;
+        safe_fs::new_profile_dir(&profile_dir, name)?;
         let linker = linker::Linker::new(self.provider.as_ref());
         linker.link_profile(&profile, &source_profile)?;
+        // The directory only becomes a listed/launchable profile after setup
+        // succeeds. Failed setup remains private and cannot be silently reused.
+        config::save_profile(&profile, &profile_toml)?;
 
         Ok(profile)
     }
@@ -608,14 +606,11 @@ impl ProfileManager {
 
         self.require_desktop_stopped()?;
         let source_profile = self.get_profile(source_name)?;
+        let sharing_source = self.get_profile(&source_profile.sharing.source.profile)?;
 
         let profiles_dir = self.app_config.lock().unwrap().profiles_dir.clone();
         let target_dir = profiles_dir.join(target_name);
         let target_toml = target_dir.join("profile.toml");
-
-        if target_toml.exists() {
-            return Err(CswError::ProfileAlreadyExists(target_name.to_string()));
-        }
 
         let target_profile = Profile {
             profile: ProfileMeta {
@@ -637,7 +632,7 @@ impl ProfileManager {
         };
 
         // Create target directory structure
-        safe_fs::private_dir(&target_dir)?;
+        safe_fs::new_profile_dir(&target_dir, target_name)?;
         safe_fs::private_dir(&target_profile.isolation.desktop_user_data_dir)?;
         safe_fs::private_dir(&target_profile.isolation.cli_config_dir)?;
 
@@ -663,6 +658,7 @@ impl ProfileManager {
             for entry in fs::read_dir(source_root)? {
                 let entry = entry?;
                 let path = entry.path();
+                let ty = entry.file_type()?;
                 let filename = entry.file_name();
                 let managed = linker::LINK_ITEMS
                     .iter()
@@ -671,9 +667,9 @@ impl ProfileManager {
                     continue;
                 }
                 let target_path = target_root.join(&filename);
-                if path.is_dir() {
+                if ty.is_dir() {
                     self.copy_dir_recursive(&path, &target_path)?;
-                } else {
+                } else if ty.is_file() {
                     fs::copy(&path, &target_path)?;
                 }
             }
@@ -705,7 +701,7 @@ impl ProfileManager {
             let target_path = linker::item_path(&target_profile, item);
             if source_path.is_dir() {
                 self.copy_dir_recursive(&source_path, &target_path)?;
-            } else {
+            } else if source_path.is_file() {
                 fs::copy(&source_path, &target_path)?;
             }
         }
@@ -717,7 +713,6 @@ impl ProfileManager {
         //    the real data copied above untouched (an existing real target is
         //    never replaced for Copy / Isolate) and gives the rest its fresh
         //    state (empty directories, nothing for files).
-        let sharing_source = self.get_profile(&target_profile.sharing.source.profile)?;
         let linker = linker::Linker::new(self.provider.as_ref());
         linker.link_profile(&target_profile, &sharing_source)?;
 

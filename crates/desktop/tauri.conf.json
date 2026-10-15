@@ -1,6 +1,6 @@
 {
   "productName": "Claude-Desktop-Switcher",
-  "version": "0.24.6-local.1",
+  "version": "0.24.6-local.2",
   "identifier": "com.seichris.claude-desktop-switcher",
   "build": {
     "frontendDist": "./ui"
