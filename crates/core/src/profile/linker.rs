@@ -167,8 +167,8 @@ impl<'a> Linker<'a> {
     /// `unlink_profile` cleans up and what the isolation inspector checks.
     pub fn link_profile(&self, target_profile: &Profile, source_profile: &Profile) -> Result<()> {
         // Ensure base target directories exist
-        fs::create_dir_all(&target_profile.isolation.desktop_user_data_dir)?;
-        fs::create_dir_all(&target_profile.isolation.cli_config_dir)?;
+        super::safe_fs::private_dir(&target_profile.isolation.desktop_user_data_dir)?;
+        super::safe_fs::private_dir(&target_profile.isolation.cli_config_dir)?;
 
         for item in LINK_ITEMS {
             self.apply_link(
@@ -260,7 +260,7 @@ impl<'a> Linker<'a> {
                 // than destroying real data for nothing.
             }
             SharingMode::Copy => {
-                if source.exists() {
+                if source.exists() && !source.is_symlink() {
                     if is_directory {
                         self.copy_dir_all(source, target)?;
                     } else {
@@ -329,17 +329,7 @@ impl<'a> Linker<'a> {
     }
 
     fn copy_dir_all(&self, src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<()> {
-        fs::create_dir_all(&dst)?;
-        for entry in fs::read_dir(src)? {
-            let entry = entry?;
-            let ty = entry.file_type()?;
-            if ty.is_dir() {
-                self.copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
-            } else {
-                fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
-            }
-        }
-        Ok(())
+        super::safe_fs::copy_directory(src.as_ref(), dst.as_ref())
     }
 }
 

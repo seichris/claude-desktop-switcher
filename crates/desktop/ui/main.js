@@ -1332,7 +1332,7 @@ async function doClone(source, target) {
     // Name both sides: which environment was duplicated, under which new name.
     showToast(T(`「${source}」を「${target}」として複製しました。`, `Duplicated "${source}" as "${target}".`));
   } catch (e) {
-    showToast('複製できませんでした。同じ名前がすでにあるか確認してください。', true);
+    showToast(String(e), true);
   }
 }
 
@@ -1799,7 +1799,7 @@ const PRIVACY_URL_JA = 'https://github.com/matsumotory/claude-desktop-switcher/b
 const PRIVACY_URL_EN = 'https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/PRIVACY_EN.md';
 // The releases page, where csw is published. The same URL as the footer's
 // update check (index.html), so it adds nothing to that list.
-const RELEASES_URL = 'https://github.com/matsumotory/claude-desktop-switcher/releases';
+const RELEASES_URL = 'https://github.com/seichris/claude-desktop-switcher/releases';
 
 // Hand a fixed https GitHub URL to the OS (Rust open_url) so it opens in the
 // default browser. CSW makes no network requests itself.

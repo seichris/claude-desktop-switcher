@@ -4,6 +4,8 @@ pub mod inspector;
 pub mod linker;
 pub mod state;
 
+pub(crate) mod safe_fs;
+
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -302,6 +304,7 @@ pub struct ProfileManager {
 impl ProfileManager {
     pub fn new(provider: Arc<dyn crate::platform::PlatformProvider>) -> Result<Self> {
         let app_data_dir = provider.app_data_dir();
+        safe_fs::private_dir(&app_data_dir)?;
         let app_config_path = app_data_dir.join("config.toml");
 
         let app_config = if app_config_path.exists() {
@@ -312,7 +315,15 @@ impl ProfileManager {
             default_config
         };
 
-        // Ensure default profile directory structure is initialized (virtual config only, no files modified)
+        // Refuse redirected storage: profile roots must stay beneath CSW data.
+        if app_config.profiles_dir != app_data_dir.join("profiles") {
+            return Err(CswError::Other(
+                "Refused a redirected profiles directory".into(),
+            ));
+        }
+        safe_fs::private_dir(&app_config.profiles_dir)?;
+
+        // Default Claude data remains untouched.
         let manager = Self {
             provider,
             app_config_path,
@@ -387,7 +398,26 @@ impl ProfileManager {
             return Err(CswError::ProfileNotFound(name.to_string()));
         }
 
-        config::load_profile(&profile_toml)
+        safe_fs::private_dir(&profiles_dir.join(name))?;
+        safe_fs::reject_symlink(&profile_toml)?;
+        let profile = config::load_profile(&profile_toml)?;
+        if profile.profile.name != name
+            || profile.profile.is_default
+            || profile.isolation.desktop_user_data_dir
+                != profiles_dir.join(name).join("desktop-data")
+            || profile.isolation.cli_config_dir != profiles_dir.join(name).join("cli-data")
+        {
+            return Err(CswError::Other(
+                "Refused redirected profile identity or data paths".into(),
+            ));
+        }
+        for path in [
+            &profile.isolation.desktop_user_data_dir,
+            &profile.isolation.cli_config_dir,
+        ] {
+            safe_fs::reject_symlink(path)?;
+        }
+        Ok(profile)
     }
 
     pub fn create_profile(
@@ -426,6 +456,7 @@ impl ProfileManager {
             sharing,
         };
 
+        safe_fs::private_dir(&profile_dir)?;
         config::save_profile(&profile, &profile_toml)?;
 
         // Apply linking immediately
@@ -536,6 +567,7 @@ impl ProfileManager {
                 "The default environment (existing Claude) has no links to fix".to_string(),
             ));
         }
+        self.require_desktop_stopped()?;
         let profile = self.get_profile(name)?;
         let source_profile = self.get_profile(&profile.sharing.source.profile)?;
         let inspector = inspector::Inspector::new(self.provider.as_ref());
@@ -574,6 +606,7 @@ impl ProfileManager {
             ));
         }
 
+        self.require_desktop_stopped()?;
         let source_profile = self.get_profile(source_name)?;
 
         let profiles_dir = self.app_config.lock().unwrap().profiles_dir.clone();
@@ -604,9 +637,9 @@ impl ProfileManager {
         };
 
         // Create target directory structure
-        fs::create_dir_all(&target_dir)?;
-        fs::create_dir_all(&target_profile.isolation.desktop_user_data_dir)?;
-        fs::create_dir_all(&target_profile.isolation.cli_config_dir)?;
+        safe_fs::private_dir(&target_dir)?;
+        safe_fs::private_dir(&target_profile.isolation.desktop_user_data_dir)?;
+        safe_fs::private_dir(&target_profile.isolation.cli_config_dir)?;
 
         // 1. Everything the linker does not manage is copied verbatim (real
         //    files and directories; symlinks are skipped): the app's own state,
@@ -695,16 +728,18 @@ impl ProfileManager {
     }
 
     fn copy_dir_recursive(&self, src: &std::path::Path, dst: &std::path::Path) -> Result<()> {
-        fs::create_dir_all(dst)?;
-        for entry in fs::read_dir(src)? {
-            let entry = entry?;
-            let ty = entry.file_type()?;
-            let target_path = dst.join(entry.file_name());
-            if ty.is_dir() {
-                self.copy_dir_recursive(&entry.path(), &target_path)?;
-            } else {
-                fs::copy(entry.path(), &target_path)?;
-            }
+        safe_fs::copy_directory(src, dst)
+    }
+
+    /// Maintenance must never race a live Desktop, including a secondary
+    /// environment that is not saved as active. Inspection errors propagate.
+    fn require_desktop_stopped(&self) -> Result<()> {
+        if self.provider.is_claude_desktop_running()?
+            || !self.provider.running_desktop_args()?.is_empty()
+        {
+            return Err(CswError::Other(
+                "Quit every Claude Desktop instance before duplicating, deleting, or repairing environments".into(),
+            ));
         }
         Ok(())
     }
@@ -751,6 +786,8 @@ impl ProfileManager {
         if self.active_profile_name() == name {
             return Err(CswError::ActiveProfileCannotBeDeleted(name.to_string()));
         }
+
+        self.require_desktop_stopped()?;
 
         // Ensure the profile exists (and the name is valid) before touching disk.
         self.get_profile(name)?;

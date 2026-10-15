@@ -97,7 +97,7 @@ impl PlatformProvider for MacOsProvider {
             return Err(CswError::DesktopNotInstalled);
         }
 
-        let mut cmd = Command::new("open");
+        let mut cmd = Command::new("/usr/bin/open");
         cmd.arg("-n").arg("-a").arg(&app_path);
 
         if let Some(cli_dir) = cli_config_dir {
@@ -121,14 +121,19 @@ impl PlatformProvider for MacOsProvider {
         // `-a` keeps pgrep's own ancestors in the match list. Run in a terminal
         // inside Claude, csw descends from that Claude, which must still count
         // as running (`csw switch` refuses while it runs).
-        let output = Command::new("pgrep")
+        let output = Command::new("/usr/bin/pgrep")
             .arg("-a")
             .arg("-f")
             .arg("Claude.app/Contents/MacOS/Claude")
             .output()?;
 
+        if output.status.code() == Some(1) {
+            return Ok(vec![]); // pgrep: no matches
+        }
         if !output.status.success() {
-            return Ok(vec![]);
+            return Err(CswError::Other(
+                "Could not inspect Claude processes; maintenance refused".into(),
+            ));
         }
 
         let pids: Vec<u32> = String::from_utf8_lossy(&output.stdout)
@@ -165,14 +170,16 @@ impl PlatformProvider for MacOsProvider {
             .collect::<Vec<_>>()
             .join(",");
         // `ps -o args=` prints one full command line per pid, no header.
-        let output = Command::new("ps")
+        let output = Command::new("/bin/ps")
             .arg("-p")
             .arg(pid_list)
             .arg("-o")
             .arg("args=")
             .output()?;
         if !output.status.success() {
-            return Ok(vec![]);
+            return Err(CswError::Other(
+                "Could not inspect Claude process arguments".into(),
+            ));
         }
         Ok(main_process_arg_lines(&String::from_utf8_lossy(
             &output.stdout,
@@ -190,14 +197,16 @@ impl PlatformProvider for MacOsProvider {
             .collect::<Vec<_>>()
             .join(",");
         // `ps -o pid=,args=` prints "<pid> <full command line>" per pid, no header.
-        let output = Command::new("ps")
+        let output = Command::new("/bin/ps")
             .arg("-p")
             .arg(pid_list)
             .arg("-o")
             .arg("pid=,args=")
             .output()?;
         if !output.status.success() {
-            return Ok(vec![]);
+            return Err(CswError::Other(
+                "Could not inspect Claude process arguments".into(),
+            ));
         }
         Ok(main_process_pid_lines(&String::from_utf8_lossy(
             &output.stdout,
@@ -234,7 +243,7 @@ impl PlatformProvider for MacOsProvider {
         // `ps -o args=` for just that process; a non-Claude frontmost app (or a
         // Claude helper process, which never owns the frontmost window) yields
         // no main-process line.
-        let output = Command::new("ps")
+        let output = Command::new("/bin/ps")
             .arg("-p")
             .arg(pid.to_string())
             .arg("-o")

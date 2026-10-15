@@ -132,6 +132,173 @@ fn test_clone_profile_rejects_default_source() {
 }
 
 #[test]
+fn maintenance_refuses_a_running_secondary_profile_without_touching_data() {
+    let tmp = tempdir().unwrap();
+    let provider = Arc::new(
+        MockPlatformProvider::new(
+            tmp.path().join("desktop"),
+            tmp.path().join("cli"),
+            tmp.path().join("csw"),
+        )
+        .with_running_args(vec![
+            "/Applications/Claude.app/Contents/MacOS/Claude --user-data-dir=/secondary".into(),
+        ]),
+    );
+    let manager = ProfileManager::new(provider).unwrap();
+    let p = manager
+        .create_profile("secondary", SharingConfig::default(), None)
+        .unwrap();
+    let sentinel = p.isolation.desktop_user_data_dir.join("Cookies");
+    std::fs::write(&sentinel, "fixture-session").unwrap();
+    assert_eq!(manager.active_profile_name(), "default");
+    assert!(manager.delete_profile("secondary").is_err());
+    assert!(manager.purge_profile("secondary").is_err());
+    assert!(manager.clone_profile("secondary", "copy").is_err());
+    assert_eq!(
+        std::fs::read_to_string(sentinel).unwrap(),
+        "fixture-session"
+    );
+    assert!(!tmp.path().join("csw/profiles/copy").exists());
+}
+
+#[test]
+fn maintenance_fails_closed_when_process_inspection_fails() {
+    let tmp = tempdir().unwrap();
+    let provider = Arc::new(
+        MockPlatformProvider::new(
+            tmp.path().join("desktop"),
+            tmp.path().join("cli"),
+            tmp.path().join("csw"),
+        )
+        .with_process_inspection_failure(),
+    );
+    let manager = ProfileManager::new(provider).unwrap();
+    let p = manager
+        .create_profile("keep", SharingConfig::default(), None)
+        .unwrap();
+    assert!(manager.delete_profile("keep").is_err());
+    assert!(manager.purge_profile("keep").is_err());
+    assert!(manager.clone_profile("keep", "copy").is_err());
+    assert!(manager.doctor_fix_links("keep").is_err());
+    assert!(p.isolation.desktop_user_data_dir.is_dir());
+    assert!(!tmp.path().join("csw/profiles/copy").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn clone_skips_nested_external_and_dangling_links_and_keeps_private_directories() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let (provider, manager, tmp) = setup_test_manager();
+    let p = manager
+        .create_profile("source", SharingConfig::default(), None)
+        .unwrap();
+    let nested = p.isolation.desktop_user_data_dir.join("storage/nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::set_permissions(&nested, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::write(nested.join("session"), "private-fixture").unwrap();
+    std::fs::set_permissions(
+        nested.join("session"),
+        std::fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+    let external = tmp.path().join("outside-secret");
+    std::fs::write(&external, "must-not-copy").unwrap();
+    symlink(&external, nested.join("external")).unwrap();
+    symlink(tmp.path(), nested.join("external-dir")).unwrap();
+    symlink(tmp.path().join("missing"), nested.join("dangling")).unwrap();
+    let cloned = manager.clone_profile("source", "copy").unwrap();
+    let dest = cloned
+        .isolation
+        .desktop_user_data_dir
+        .join("storage/nested");
+    assert_eq!(
+        std::fs::read_to_string(dest.join("session")).unwrap(),
+        "private-fixture"
+    );
+    for name in ["external", "external-dir", "dangling"] {
+        assert!(std::fs::symlink_metadata(dest.join(name)).is_err());
+    }
+    for path in [
+        provider.app_data_dir(),
+        dest,
+        cloned.isolation.cli_config_dir,
+    ] {
+        assert_eq!(
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_mode_skips_nested_symlinks_too() {
+    use std::os::unix::fs::symlink;
+    let (provider, manager, tmp) = setup_test_manager();
+    let rules = provider.claude_cli_default_dir().join("rules/nested");
+    std::fs::create_dir_all(&rules).unwrap();
+    let external = tmp.path().join("secret");
+    std::fs::write(&external, "must-not-copy").unwrap();
+    symlink(external, rules.join("external")).unwrap();
+    std::fs::write(rules.join("ordinary.md"), "rule").unwrap();
+    let sharing = SharingConfig {
+        cli_rules: SharingMode::Copy,
+        ..SharingConfig::default()
+    };
+    let p = manager.create_profile("copied", sharing, None).unwrap();
+    assert!(
+        p.isolation
+            .cli_config_dir
+            .join("rules/nested/ordinary.md")
+            .is_file()
+    );
+    assert!(
+        !p.isolation
+            .cli_config_dir
+            .join("rules/nested/external")
+            .exists()
+    );
+}
+
+#[test]
+fn redirected_profile_paths_are_refused_before_purge() {
+    let (provider, manager, _tmp) = setup_test_manager();
+    let mut p = manager
+        .create_profile("tampered", SharingConfig::default(), None)
+        .unwrap();
+    let metadata = p
+        .isolation
+        .desktop_user_data_dir
+        .parent()
+        .unwrap()
+        .join("profile.toml");
+    let sentinel = provider.claude_cli_default_dir().join("settings.json");
+    std::fs::write(&sentinel, "keep").unwrap();
+    p.isolation.cli_config_dir = provider.claude_cli_default_dir();
+    config::save_profile(&p, &metadata).unwrap();
+    assert!(manager.get_profile("tampered").is_err());
+    assert!(manager.purge_profile("tampered").is_err());
+    assert_eq!(std::fs::read_to_string(sentinel).unwrap(), "keep");
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_profile_root_is_refused_before_mutation() {
+    use std::os::unix::fs::symlink;
+    let (provider, manager, _tmp) = setup_test_manager();
+    let p = manager
+        .create_profile("aliased", SharingConfig::default(), None)
+        .unwrap();
+    let root = p.isolation.desktop_user_data_dir.parent().unwrap();
+    let moved = provider.app_data_dir().join("saved");
+    std::fs::rename(root, &moved).unwrap();
+    symlink(&moved, root).unwrap();
+    assert!(manager.get_profile("aliased").is_err());
+    assert!(manager.purge_profile("aliased").is_err());
+    assert!(moved.join("profile.toml").is_file());
+}
+
+#[test]
 fn validate_profile_name_accepts_japanese_and_safe_ascii() {
     for ok in [
         "研究用",
