@@ -2,7 +2,7 @@
 
 This fork was reviewed against upstream version 0.24.6 at
 `5892992dead8f9596c5291d87b0259d0b494f650`. The local build has version
-`0.24.6-local.2` and bundle identifier `com.seichris.claude-desktop-switcher`.
+`0.24.6-local.3` and bundle identifier `com.seichris.claude-desktop-switcher`.
 
 The source review found no explicit runtime credential exfiltration, Keychain
 access, telemetry or automatic updater. This is limited source evidence, not a
@@ -14,6 +14,11 @@ Claude accounts still run as the same macOS user.
 - Refuse duplication, deletion, purge and link repair while any Claude Desktop
   instance runs, including a secondary environment. Process-inspection errors
   propagate rather than being interpreted as no matching processes.
+- Port process-output validation and Unicode locale handling from upstream
+  [PR #225](https://github.com/matsumotory/claude-desktop-switcher/pull/225),
+  commit `3e19abd7dbcf643afc8d02a87e268d8537dad80b`. Reject empty, invalid or
+  partially unreadable output and use UTF-8 for process inspection. This fork
+  applies those checks to PID/argument pairs as well, keeping its quit-all guard.
 - Keep CSW storage and copied directories private with mode 0700.
 - Reserve new profile directories exclusively. An unfinished directory may hold
   another account's sign-in data and is refused rather than adopted. Validate
