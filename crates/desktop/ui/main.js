@@ -229,7 +229,7 @@ const EN = {
 // must never be run through the dictionary: a user could name an environment
 // "仕事" and it must not become "Work". The default row's "既存の Claude" is
 // translated at construction with T() instead, so these can be skipped wholesale.
-const I18N_SKIP = '.profile-name, .detail-name, .profile-note, .detail-note, .path-code, .code-line, code';
+const I18N_SKIP = '.profile-name, .detail-name, .profile-note, .detail-note, .usage-profile-name, .path-code, .code-line, code';
 const setEN = (v) => (Object.prototype.hasOwnProperty.call(EN, v) ? EN[v] : null);
 
 function applyI18nText(node) {
@@ -361,6 +361,8 @@ let selectedName = null;
 let currentMode = 'isolate';
 let overrides = { ...PRESETS.isolate };
 let advancedCustomized = false;
+let usageReports = null;
+let usageReadPending = false;
 
 // --- DOM builder helpers (no innerHTML) -------------------------------------
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -454,6 +456,13 @@ const el = {
   viewEmpty: $('viewEmpty'),
   viewDetail: $('viewDetail'),
   viewCreate: $('viewCreate'),
+  viewUsage: $('viewUsage'),
+  btnUsage: $('btnUsage'),
+  btnUsageRefresh: $('btnUsageRefresh'),
+  usageReports: $('usageReports'),
+  usageMessage: $('usageMessage'),
+  usageScroll: $('usageScroll'),
+  usageFade: $('usageFade'),
   detailContent: $('detailContent'),
   detailFooter: $('detailFooter'),
   emptyFirstRun: $('emptyFirstRun'),
@@ -497,6 +506,9 @@ function setView(view) {
   el.viewEmpty.hidden = view !== 'empty';
   el.viewDetail.hidden = view !== 'detail';
   el.viewCreate.hidden = view !== 'create';
+  el.viewUsage.hidden = view !== 'usage';
+  el.btnUsage.classList.toggle('selected', view === 'usage');
+  el.btnUsage.setAttribute('aria-pressed', view === 'usage' ? 'true' : 'false');
   requestAnimationFrame(refreshFades);
 }
 
@@ -554,6 +566,133 @@ function renderSidebar() {
 }
 
 // --- Detail view ------------------------------------------------------------
+
+// These names describe known limit windows; identifiers and profile names from
+// disk are never used as markup, translated, or evaluated.
+const USAGE_WINDOW_LABELS = {
+  five_hour: ['5時間の上限', '5-hour limit'],
+  seven_day: ['7日間の上限', '7-day limit'],
+  seven_day_opus: ['Opusの7日間の上限', 'Opus 7-day limit'],
+  seven_day_sonnet: ['Sonnetの7日間の上限', 'Sonnet 7-day limit'],
+  seven_day_oauth_apps: ['OAuthアプリの7日間の上限', 'OAuth apps 7-day limit'],
+  seven_day_cowork: ['Coworkの7日間の上限', 'Cowork 7-day limit'],
+  seven_day_omelette: ['追加の7日間の上限', 'Additional 7-day limit'],
+  omelette_promotional: ['追加のプロモーション上限', 'Additional promotional limit'],
+};
+
+function usageDate(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString(LANG === 'ja' ? 'ja-JP' : 'en-US', {
+    year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+  });
+}
+
+function usageStateLabel(state) {
+  return ({
+    fresh: T('最近の記録', 'Recent reading'),
+    stale: T('古いデータ', 'Stale data'),
+    missing: T('記録なし', 'No cached data'),
+    unavailable: T('読み取り不可', 'Unavailable'),
+  })[state] || T('読み取り不可', 'Unavailable');
+}
+
+function renderUsageWindow(window) {
+  const labels = Object.hasOwn(USAGE_WINDOW_LABELS, window.key) ? USAGE_WINDOW_LABELS[window.key] : null;
+  if (!labels) return null;
+  const label = T(...labels);
+  const percent = Number.isFinite(window.used_percent) && window.used_percent >= 0 && window.used_percent <= 100
+    ? window.used_percent : null;
+  const formatted = percent == null ? T('不明', 'Unknown')
+    : T(`${new Intl.NumberFormat('ja-JP', { maximumFractionDigits: 1 }).format(percent)}%使用`, `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(percent)}% used`);
+  const row = h('div', { class: 'usage-window' },
+    h('div', { class: 'usage-window-heading' },
+      h('span', { class: 'usage-window-label', text: label }),
+      h('span', { class: 'usage-value', text: formatted })));
+  if (percent != null) {
+    const bar = h('div', {
+      class: 'usage-bar', role: 'progressbar', 'aria-label': label,
+      'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(percent),
+      'aria-valuetext': formatted,
+    });
+    const fill = h('div', { class: 'usage-bar-fill' + (percent >= 90 ? ' usage-high' : percent >= 75 ? ' usage-elevated' : '') });
+    fill.style.width = `${percent}%`;
+    bar.appendChild(fill);
+    row.appendChild(bar);
+  }
+  const reset = usageDate(window.resets_at_ms);
+  const resetText = reset == null ? T('リセット時刻：記録なし', 'Reset time: not recorded')
+    : window.state === 'reset_passed' || window.resets_at_ms <= Date.now()
+      ? T(`リセット予定時刻：${reset}。新しい記録が必要です。`, `Reset was scheduled for ${reset}. A newer reading is needed.`)
+      : T(`リセット予定時刻：${reset}`, `Scheduled reset: ${reset}`);
+  row.appendChild(h('p', { class: 'usage-reset', text: resetText }));
+  return row;
+}
+
+function renderUsageReports() {
+  const reports = Array.isArray(usageReports) ? usageReports : [];
+  el.usageReports.replaceChildren(...reports.map((report) => {
+    const windows = Array.isArray(report.windows) ? report.windows : [];
+    let state = ['fresh', 'stale', 'missing', 'unavailable'].includes(report.state) ? report.state : 'unavailable';
+    // A retained snapshot can age while a later read fails. Only downgrade its
+    // presentation; never synthesize a new reading or reset a percentage.
+    if (state === 'fresh' && (Date.now() - report.captured_at_ms > 30 * 60000
+      || windows.some((w) => Number.isFinite(w.resets_at_ms) && w.resets_at_ms <= Date.now()))) state = 'stale';
+    const captured = usageDate(report.captured_at_ms);
+    const age = captured ? relTime(new Date(report.captured_at_ms).toISOString()) : null;
+    const checkedText = captured
+      ? T(`最終確認：${captured}・${age}`, `Last checked: ${captured} · ${age}`)
+      : T('最終確認：記録なし', 'Last checked: not recorded');
+    return h('article', { class: 'usage-report usage-' + state },
+      h('div', { class: 'usage-report-heading' },
+        h('h2', { class: 'usage-profile-name', text: report.profile === 'default' ? T('既存のClaude', 'Existing Claude') : report.profile }),
+        h('span', { class: 'usage-state', text: usageStateLabel(state) })),
+      h('p', { class: 'usage-checked', text: checkedText }),
+      ...windows.map(renderUsageWindow),
+      report.source === 'history'
+        ? h('p', { class: 'usage-source', text: T('利用量の履歴から表示しています。リセット時刻は保存されていません。', 'Shown from usage history. Reset times are not saved in that history.') }) : null,
+      state === 'missing'
+        ? h('p', { class: 'usage-source', text: T('この環境には利用量の記録がありません。環境を使うとClaudeが記録を保存する場合があります。', 'No usage reading is saved in this environment. Claude may save one when you use it.') }) : null,
+      state === 'unavailable'
+        ? h('p', { class: 'usage-source', text: T('対応する形式の記録を安全に読み取れませんでした。', 'A supported reading could not be read safely.') }) : null);
+  }));
+  requestAnimationFrame(refreshFades);
+}
+
+async function loadUsageReports() {
+  if (usageReadPending) return;
+  usageReadPending = true;
+  el.btnUsageRefresh.disabled = true;
+  el.usageReports.setAttribute('aria-busy', 'true');
+  el.usageMessage.textContent = T('手元の保存内容を確認しています。', 'Checking the local cache.');
+  try {
+    const reports = await invoke('get_usage_reports');
+    if (!Array.isArray(reports)) throw new Error('usage_unavailable');
+    usageReports = reports;
+    renderUsageReports();
+    el.usageMessage.textContent = reports.length ? '' : T('環境が見つかりませんでした。', 'No environments were found.');
+  } catch (error) {
+    renderUsageReports();
+    el.usageMessage.textContent = String(error) === 'usage_read_pending'
+      ? T('保存内容の確認中です。しばらくしてから再確認してください。', 'A local check is already running. Recheck in a moment.')
+      : T('保存内容を再確認できませんでした。以前の記録がある場合は表示を残しています。', 'The local cache could not be rechecked. Any previous readings remain visible.');
+  } finally {
+    usageReadPending = false;
+    el.btnUsageRefresh.disabled = false;
+    el.usageReports.removeAttribute('aria-busy');
+    refreshFades();
+  }
+}
+
+function showUsage() {
+  selectedName = null;
+  renderSidebar();
+  setView('usage');
+  renderUsageReports();
+  return loadUsageReports();
+}
+
 async function showDetail(name) {
   selectedName = name;
   let d;
@@ -1550,6 +1689,7 @@ function refreshFades() {
   fadeFor(el.emptyScroll, el.emptyFade);
   fadeFor(el.detailScroll, el.detailFade);
   fadeFor(el.createScroll, el.createFade);
+  fadeFor(el.usageScroll, el.usageFade);
 }
 
 // --- Clipboard --------------------------------------------------------------
@@ -1663,6 +1803,10 @@ function renderTakeover() {
 async function revalidateRunning() {
   const before = JSON.stringify([desktopRunning, runningProfiles, profiles.map((p) => p.name)]);
   await refreshProfiles();
+  if (!el.viewUsage.hidden) {
+    await loadUsageReports();
+    return;
+  }
   if (JSON.stringify([desktopRunning, runningProfiles, profiles.map((p) => p.name)]) === before) return;
   if (!el.viewDetail.hidden && selectedName) {
     if (profiles.some((p) => p.name === selectedName)) {
@@ -1680,6 +1824,12 @@ async function revalidateRunning() {
 function wireEvents() {
   el.btnCreate.addEventListener('click', () => withTransition(showCreate));
   el.btnCreateEmpty.addEventListener('click', () => withTransition(showCreate));
+  el.btnUsage.addEventListener('click', () => withTransition(showUsage));
+  el.btnUsageRefresh.addEventListener('click', loadUsageReports);
+  el.usageScroll.addEventListener('scroll', refreshFades, { passive: true });
+  setInterval(() => {
+    if (!document.hidden && !el.viewUsage.hidden) loadUsageReports();
+  }, 60000);
 
   document.querySelectorAll('input[name="mode"]').forEach((r) =>
     r.addEventListener('change', () => {
@@ -1795,8 +1945,8 @@ const DISCLAIMER = [
 // Fixed GitHub URLs for the privacy document (ja/en). Listed, like the footer
 // links (data-url, and data-url-en for the English UI), in docs/PRIVACY.md as
 // the complete set of URLs open_url may receive.
-const PRIVACY_URL_JA = 'https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/PRIVACY.md';
-const PRIVACY_URL_EN = 'https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/PRIVACY_EN.md';
+const PRIVACY_URL_JA = 'https://github.com/seichris/claude-desktop-switcher/blob/main/docs/PRIVACY.md';
+const PRIVACY_URL_EN = 'https://github.com/seichris/claude-desktop-switcher/blob/main/docs/PRIVACY_EN.md';
 // The releases page, where csw is published. The same URL as the footer's
 // update check (index.html), so it adds nothing to that list.
 const RELEASES_URL = 'https://github.com/seichris/claude-desktop-switcher/releases';
@@ -1944,6 +2094,20 @@ function devInvoke(cmd, args) {
     if (sample[name]) sample[name].note = note;
   }
   switch (cmd) {
+    case 'get_usage_reports': {
+      const now = Date.now();
+      const window = (key, used_percent, resets_at_ms, state = 'available') => ({ key, used_percent, resets_at_ms, state });
+      return Promise.resolve([
+        { profile: 'default', state: 'fresh', source: 'cache', captured_at_ms: now - 4 * 60000,
+          windows: [window('five_hour', 24, now + 2 * 3600000), window('seven_day', 58, now + 3 * 86400000)] },
+        { profile: NM.work, state: 'stale', source: 'cache', captured_at_ms: now - 8 * 3600000,
+          windows: [window('five_hour', 78, now - 4 * 3600000, 'reset_passed'), window('seven_day', 92, now + 2 * 86400000)] },
+        { profile: NM.research, state: 'stale', source: 'history', captured_at_ms: now - 45 * 60000,
+          windows: [window('five_hour', 12, null), window('seven_day', null, null, 'missing')] },
+        { profile: NM.testing, state: 'missing', source: null, captured_at_ms: null,
+          windows: [window('five_hour', null, null, 'missing'), window('seven_day', null, null, 'missing')] },
+      ]);
+    }
     case 'list_profiles':
       return Promise.resolve([sample.default, sample[NM.work], sample[NM.research], sample[NM.testing]]
         .map((p) => ({

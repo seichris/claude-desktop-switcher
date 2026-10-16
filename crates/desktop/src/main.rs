@@ -9,6 +9,7 @@ use tauri::{
 };
 
 mod dmg;
+mod usage_cache;
 
 use csw_core::platform::create_provider;
 use csw_core::profile::{ProfileManager, SharingConfig, SharingMode};
@@ -25,9 +26,47 @@ struct AppState {
     /// outside-CSW Claude quits. Volatile on purpose: after a CSW restart the
     /// transition cannot be observed, so no stale notice survives.
     takeover_from: std::sync::Mutex<Option<String>>,
+    usage_cache: Arc<std::sync::Mutex<usage_cache::ReadCache<Vec<csw_core::usage::UsageReport>>>>,
 }
 
 // Tauri commands exposed to frontend settings UI
+
+/// Read only known local usage sources. The frontend cannot supply a path or URL.
+#[tauri::command]
+async fn get_usage_reports(
+    state: State<'_, AppState>,
+) -> Result<Vec<csw_core::usage::UsageReport>, String> {
+    let decision = state
+        .usage_cache
+        .lock()
+        .map_err(|_| "usage_unavailable".to_string())?
+        .begin(std::time::Instant::now());
+    match decision {
+        usage_cache::ReadDecision::Cached(value) => return value.map_err(str::to_string),
+        usage_cache::ReadDecision::Pending => return Err("usage_read_pending".to_string()),
+        usage_cache::ReadDecision::Start => {}
+    }
+
+    let manager = state.profile_manager.clone();
+    let cache = state.usage_cache.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let reports = csw_core::usage::read_all_usage(&manager).map_err(|_| "usage_unavailable");
+        if let Ok(mut cache) = cache.lock() {
+            cache.finish(std::time::Instant::now(), reports.clone());
+        }
+        reports
+    })
+    .await;
+    match result {
+        Ok(value) => value.map_err(str::to_string),
+        Err(_) => {
+            if let Ok(mut cache) = state.usage_cache.lock() {
+                cache.finish(std::time::Instant::now(), Err("usage_unavailable"));
+            }
+            Err("usage_unavailable".to_string())
+        }
+    }
+}
 
 #[tauri::command]
 async fn get_active_profile(state: State<'_, AppState>) -> Result<String, String> {
@@ -774,6 +813,7 @@ fn main() {
         provider,
         profile_manager,
         takeover_from: std::sync::Mutex::new(None),
+        usage_cache: Arc::new(std::sync::Mutex::new(usage_cache::ReadCache::new())),
     };
 
     tauri::Builder::default()
@@ -944,6 +984,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_active_profile,
+            get_usage_reports,
             list_profiles,
             get_profile_details,
             create_profile,

@@ -8,7 +8,7 @@ This document is kept in sync with the implementation. Whenever the implementati
 
 1. **No internet communication.** CSW sends no usage data and performs no auto-update requests.
 2. **No reading of passwords or sign-in data.** CSW never touches the macOS Keychain that stores your passwords, and never opens the contents of sign-in tokens or browser cookies. When you duplicate an environment, sign-in files that the duplicate copies, such as the Claude Desktop App's cookies, are copied as they are, like any other file, without being opened. See "About duplicating an environment" below for details.
-3. **No access to other apps' data.** CSW never reads or writes your existing Claude data on its own. It touches only the items you explicitly choose to share or copy when creating an environment.
+3. **Limited, documented local reads.** Sharing and copying touch only the items you choose. The usage view additionally reads the Claude Desktop App's saved usage history and exact matching usage-cache responses. It does not read conversations or sign-in data to obtain usage, and never changes the existing Claude data.
 4. **Zero impact by default.** CSW rewrites no shell configuration, no OS-level environment variables, and nothing in your existing Claude. Launch Claude without CSW and it behaves exactly as before.
 
 ## About network access
@@ -20,9 +20,9 @@ The single exception is the links at the bottom of the window (User guide, Repor
 - `https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/USER_GUIDE.md`
 - `https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/USER_GUIDE_EN.md`
 - `https://github.com/matsumotory/claude-desktop-switcher/issues`
-- `https://github.com/matsumotory/claude-desktop-switcher/releases`
-- `https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/PRIVACY.md`
-- `https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/PRIVACY_EN.md`
+- `https://github.com/seichris/claude-desktop-switcher/releases`
+- `https://github.com/seichris/claude-desktop-switcher/blob/main/docs/PRIVACY.md`
+- `https://github.com/seichris/claude-desktop-switcher/blob/main/docs/PRIVACY_EN.md`
 
 Update checks work the same way: CSW never queries for new versions; it simply opens the GitHub releases page in your browser.
 
@@ -44,13 +44,31 @@ In addition, the settings window stores three records for its display in the app
 ## Where CSW reads
 
 - CSW reads and writes its own folder listed above. When the detail screen shows the data breakdown, it reads only file names and their sizes and dates inside this folder, never file contents. The targets of shared links are never included in the totals.
-- CSW touches the existing Claude folders, `~/Library/Application Support/Claude` and `~/.claude`, in exactly three cases:
+- CSW touches the existing Claude folders, `~/Library/Application Support/Claude` and `~/.claude`, in the following cases:
   1. **Existence and emptiness checks**: it checks whether a folder or file exists. When you open the create screen, it also checks whether each of the two existing Claude folders is empty; that check stops at the first entry it finds and does not use the entry's name. File contents are never read.
   2. **Creating and re-pointing shared links**: for items you set to Shared when creating or duplicating an environment, it creates symbolic links inside the new environment that point to the existing Claude's originals. The isolation check's repair command, `csw doctor --fix`, likewise only re-points share links that no longer point at their declared source, or creates a share link that is missing while its source exists. Only the link is swapped or created; real files are never touched. The only exception is that an empty folder is removed. If the existing Claude had no source folder yet when you created the environment, CSW creates an empty folder on the environment's side. Once the source exists, `csw doctor --fix` removes this empty folder and then creates the share link. Removing a folder fails if it contains anything, so CSW can remove only empty folders without reading what is inside. The links and the empty folders it removes are all in the environment's folder; nothing is written on the existing Claude's side.
   3. **Copying**: for items you set to Copy when creating or duplicating an environment, it reads those files and copies them into the new environment. Only the items you chose are read, and the existing Claude's side is never modified.
+  4. **Saved usage**: the usage view reads the Desktop files listed below. It does not read Claude Code's folder for usage.
 - To tell which environment a running Claude is using, CSW reads the list of running processes and their launch arguments. It reads nothing else about those processes and no communication contents.
 - The identifier of the frontmost application is read only when you press "Check the current environment" in the menu bar icon's menu, to answer which environment the Claude in front is using. Only the process identifier and its launch arguments are read; screen contents and window titles are never read. CSW never polls for it.
 - To check whether a CSW installer disk image is still mounted, CSW reads the list of mounted disk images with `hdiutil` when it starts and when you press "Eject". Only each disk image's file path and mount points are read. CSW picks out its own disk images by name and ignores all others, and it never reads the contents of any disk image.
+
+### Local files read for Claude usage
+
+Usage reads are confined to each discovered environment's Desktop data root: `~/Library/Application Support/Claude` for Existing Claude, or `~/.context-switcher-claude/profiles/<name>/desktop-data` for a CSW environment. No account names, email addresses, or fixed account list are built into this feature.
+
+| Path below the Desktop data root | What the usage reader uses |
+|---|---|
+| `plan-usage-history.json` | Saved usage percentages, observation times, and the latest observation's organization identifier, when the history version includes it |
+| `Cache/Cache_Data` | Chromium Simple cache entry names, bounded key and format metadata, and the body of an exact matching saved usage response |
+
+The only response URLs accepted are `https://claude.ai/api/organizations/<org>/usage` and that exact URL with `?skip_spend=1`. The organization identifier comes from that environment's latest history, not from sign-in files. These URLs are used only to match local cache keys; CSW never requests them. Other cache bodies and authentication headers are not parsed. A history version without an organization identifier can supply percentages, but is not used to guess a cached organization.
+
+The reader keeps each environment separate even when two accounts belong to the same organization. It validates supported file formats and integrity fields, limits file enumeration, reads and decompression, and refuses symbolic links, hard links, and non-regular input files. Unsupported or unsafe input gives a history-only reading or unavailable data; it never triggers a credential or network fallback. Nothing is repaired, copied, or written by the usage reader.
+
+Only the environment name, usage percentages, times, source, and display state reach the screen. Raw cache contents, response URLs, and organization identifiers are not returned to the screen, logged, or saved by CSW. Usage reports are held in memory rather than written as another cache.
+
+The last-checked time is the saved observation's time. A reading over 30 minutes old or past a displayed reset is marked stale. Missing values remain unavailable, and a passed reset never changes a saved percentage to zero. A cache can survive a change of sign-in, so a reading does not prove which account is signed in now. The official Claude app remains the place to verify current usage and account identity.
 
 ## About duplicating an environment
 

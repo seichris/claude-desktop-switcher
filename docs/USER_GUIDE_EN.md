@@ -115,6 +115,20 @@ The Claude Code (CLI) sign-in is managed separately from the desktop app's sign-
 * **Desktop**: Select "Existing Claude" in the settings window (or from the menu bar icon), or simply launch `Claude.app` normally via Spotlight. It will always open your standard personal environment.
 * **CLI**: If you open a standard terminal and type `claude`, it will always operate as your personal Existing Claude environment.
 
+### Checking saved Claude usage
+
+This feature is an addition in local builds of this fork. It is not included in the upstream downloads linked in the installation steps above.
+
+The usage view lists Existing Claude and the environments CSW discovers, without a fixed account list. It shows the saved five-hour and weekly usage percentages, reset times when available, and when Claude last recorded the reading. Supported additional usage windows appear when the saved response includes them.
+
+CSW reads only the local usage history and matching usage responses already cached by the Claude Desktop App. It needs no extra sign-in, no Claude Code sign-in, and no access to passwords, tokens, cookies, or the Keychain. Checking the local cache again only rereads those records; it does not contact Claude's servers or launch Claude.
+
+- A reading older than 30 minutes is marked stale. It also becomes stale when a displayed reset time passes. The saved percentage stays visible; CSW never assumes the usage has returned to 0%.
+- Missing percentages and reset times are shown as unavailable, never as zero. A history-only reading can provide percentages without reset times.
+- The last-checked time is the time of the saved observation, not the time you opened CSW or reread the cache. Reading again cannot make an old observation current.
+
+These are records for an environment, not verification of the account currently signed in. A previous sign-in's cached data may remain after you change accounts in that environment. For a current reading or to verify the account, check the usage screen in the official Claude app for that environment. Claude decides when it updates or removes its local records, so an unused environment can stay stale or have no data.
+
 ---
 
 ## 3. What you should know: safety and zero impact
@@ -162,7 +176,7 @@ A terminal inside the app you launched from CSW is already in the same environme
 No. The desktop app's sign-in and the Claude Code (CLI) sign-in are managed separately. The first time you run `claude` in a terminal for a given environment, you need to sign in to the CLI once for that environment (choose the subscription account as the sign-in method). Once signed in, it persists for that environment, so you don't need to sign in again when you switch. The built-in terminal and an external terminal switched into the same environment share the same sign-in. See Scenario B under "Daily Workflow" for details.
 
 **Q. Can CSW list each environment's Claude usage?**
-Not at the moment. CSW is designed to make no internet connection and to never touch your passwords or sign-in. There is currently no way to obtain an accurate figure for Claude usage against its limits, including desktop-app activity, while keeping to those principles, so CSW does not offer it. If an official, safe way becomes available, we will consider adding it. You can check each environment's Claude usage in Claude itself by opening Claude for that environment.
+Local builds of this fork can, from records already saved by the Claude Desktop App. The usage view shows every discovered environment's saved percentages, available reset times, and last-checked time. Readings older than 30 minutes or past a reset are marked stale; missing values are explicit. CSW makes no network requests and reads no sign-in data. It cannot guarantee a current reading or verify the signed-in account from a cache. See "Checking saved Claude usage" above.
 
 **Q. What exactly carries over with "Separate conversations and memory too"?**
 Your global rules (CLAUDE.md), rule files (rules/), skills (skills/), plugins (plugins/), tool permissions and hooks (settings.json), and worktrees (git-worktrees.json) carry over from "Existing Claude". This mode keeps the project conversations and auto-memory (projects/) and the input history (history.jsonl) separate for this environment. The account sign-in info (config.json), the connector and app settings (claude_desktop_config.json, where MCP connectors live), the device ID (ant-did), and the session state (sessions/) are always separate, regardless of mode. To fine-tune, use "Configure in detail, item by item" on the create screen.
