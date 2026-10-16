@@ -58,6 +58,8 @@
         <ul class="profile-list" id="profileList"></ul>
       </nav>
 
+      <button type="button" class="btn btn-ghost sidebar-usage" id="btnUsage" aria-pressed="false" data-en="Claude usage">Claudeの利用量</button>
+
       <div class="sidebar-spacer"></div>
 
       <button type="button" class="btn btn-ghost sidebar-create" id="btnCreate">
@@ -94,7 +96,7 @@
       </nav>
     </aside>
 
-    <!-- Right pane: one of empty / detail / create is visible -->
+    <!-- Right pane: one view is visible. -->
     <main class="pane">
       <!-- Leftover installer disk image prompt (SPECIFICATION.md §5.A). Shown on
            launch only when a CSW .dmg is still mounted and the app is not running
@@ -125,6 +127,24 @@
           <button type="button" class="btn btn-primary" id="btnReopen">開き直す</button>
         </div>
       </div>
+
+      <section class="view" id="viewUsage" hidden>
+        <div class="view-main">
+          <div class="view-scroll" id="usageScroll">
+            <div class="view-pad">
+              <div class="usage-heading">
+                <h1 class="view-title" data-en="Claude usage">Claudeの利用量</h1>
+                <button type="button" class="btn btn-ghost" id="btnUsageRefresh" data-en="Recheck local cache">保存内容を再確認</button>
+              </div>
+              <p class="usage-explanation" data-en="Shows readings Claude saved in each environment. Readings older than 30 minutes or past a reset are stale. Recheck reads local files only; it does not contact Claude or sign in.">Claudeが各環境に保存した利用量を表示します。確認から30分を超えた記録や、リセット時刻を過ぎた記録は古いデータです。再確認は手元の保存内容を読み直し、通信やログインは行いません。</p>
+              <p class="usage-explanation" data-en="Claude controls when these saved readings update. CSW does not verify which account is currently signed in.">保存内容の更新はClaudeが行います。CSWは現在ログインしているアカウントを確認しません。</p>
+              <p class="usage-message" id="usageMessage" role="status" aria-live="polite"></p>
+              <div class="usage-reports" id="usageReports"></div>
+            </div>
+          </div>
+          <div class="view-fade" id="usageFade" hidden></div>
+        </div>
+      </section>
 
       <!-- (a) Empty / welcome -->
       <section class="view" id="viewEmpty">

@@ -25,7 +25,8 @@ import { fileURLToPath } from 'url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
 const UI = path.join(REPO, 'crates', 'desktop', 'ui');
-const OUT = path.join(REPO, 'website', 'assets');
+const OUT = process.env.CSW_APPSHOT_OUT || path.join(REPO, 'website', 'assets');
+fs.mkdirSync(OUT, { recursive: true });
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PORT = 8191, DP = 9341;
 // The footer version is left out of the screenshots on purpose: without ?appver=
@@ -76,6 +77,42 @@ async function main() {
   }
   const clickEnv = (name) => evalv(`(async()=>{const li=[...document.querySelectorAll('.profile-item')].find(e=>e.querySelector('.profile-name')?.textContent===${JSON.stringify(name)});li&&li.click();await new Promise(r=>setTimeout(r,500));return 'ok';})()`);
 
+  async function checkUsage() {
+    // Both locales must remain readable at the app's supported minimum width.
+    for (const width of [600, 720]) {
+      await cmd('Emulation.setDeviceMetricsOverride', { width, height: 600, deviceScaleFactor: 2, mobile: false });
+      await sleep(100);
+      const result = (await evalv(`(()=>{
+        const text=[...document.querySelectorAll('#viewUsage h1, #viewUsage h2, #viewUsage p, #viewUsage button, .usage-window-heading')];
+        return {width:innerWidth, page:document.documentElement.scrollWidth,
+          overflow:text.filter(e=>e.scrollWidth>e.clientWidth+1).map(e=>e.className||e.id),
+          reports:document.querySelectorAll('.usage-report').length,
+          hidden:[...document.querySelectorAll('.view')].filter(e=>e.id!=='viewUsage').every(e=>getComputedStyle(e).display==='none')};
+      })()`)).result?.value;
+      if (!result || result.page !== result.width || result.overflow.length || result.reports !== 4 || !result.hidden) {
+        throw new Error(`usage layout failed: ${JSON.stringify(result)}`);
+      }
+    }
+    const result = (await evalv(`(async()=>{
+      const original=usageReports;
+      usageReports=[...original, ...Array.from({length:3},(_,i)=>({...original[0],profile:'Synthetic '+i,
+        captured_at_ms:Date.now()-31*60000})),
+        {...original[0],profile:'<img src=x onerror=alert(1)>'}, {...original[0],profile:'仕事'}];
+      renderUsageReports();
+      await new Promise(r=>setTimeout(r,0));
+      const names=[...document.querySelectorAll('.usage-profile-name')].map(e=>e.textContent);
+      const result={count:names.length, literal:names.includes('<img src=x onerror=alert(1)>'),
+        untranslated:names.includes('仕事'), injected:!!document.querySelector('#usageReports img'),
+        aged:[...document.querySelectorAll('.usage-stale .usage-profile-name')].some(e=>e.textContent==='Synthetic 0'),
+        oldValue:[...document.querySelectorAll('.usage-stale .usage-value')].some(e=>e.textContent.includes('78%')),
+        unknown:[...document.querySelectorAll('.usage-value')].some(e=>e.textContent==='Unknown'||e.textContent==='不明')};
+      usageReports=original;renderUsageReports();return result;
+    })()`)).result?.value;
+    if (!result || result.count !== 9 || !result.literal || !result.untranslated || result.injected || !result.oldValue || !result.unknown || !result.aged) {
+      throw new Error(`usage rendering failed: ${JSON.stringify(result)}`);
+    }
+  }
+
   const done = [];
   for (const { lang, prefix, env, summary } of LOCALES) {
     // onboarding: fresh first-run empty view
@@ -88,10 +125,16 @@ async function main() {
     // create: the new-environment sheet
     await load(lang); await evalv(`showCreate();`); await sleep(400);
     await fit('createScroll', `${prefix}screen_create.png`);
+    // usage: all synthetic environments with fresh, stale and missing readings
+    await load(lang); await evalv('showUsage()'); await sleep(400);
+    await checkUsage();
+    await cmd('Emulation.setDeviceMetricsOverride', { width: 760, height: 900, deviceScaleFactor: 2, mobile: false });
+    await sleep(150);
+    await fit('usageScroll', `${prefix}screen_usage.png`);
     // hero: the sample env, disclosures collapsed, 760x498 crop
     await load(lang); await clickEnv(env); await sleep(300);
     await crop(`${prefix}hero.png`, 760, 498);
-    done.push(`${prefix}screen_onboarding.png, ${prefix}screen_overview.png, ${prefix}screen_create.png, ${prefix}hero.png`);
+    done.push(`${prefix}screen_onboarding.png, ${prefix}screen_overview.png, ${prefix}screen_create.png, ${prefix}screen_usage.png, ${prefix}hero.png`);
   }
 
   console.log('regenerated:', done.join(' | '), '; errors:', errors.length ? JSON.stringify(errors) : 'none');
