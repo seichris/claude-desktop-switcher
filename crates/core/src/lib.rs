@@ -3,3 +3,5 @@ pub mod platform;
 pub mod profile;
 pub mod session;
 pub mod switcher;
+
+pub mod usage;

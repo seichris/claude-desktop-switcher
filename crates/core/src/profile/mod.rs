@@ -791,6 +791,19 @@ impl ProfileManager {
         Ok(profiles_dir.join(name))
     }
 
+    /// Fixed usage roots only; reading usage must not load auth-bearing profile
+    /// contents or call get_profile (which normalizes permissions).
+    pub(crate) fn usage_roots(&self) -> Result<(PathBuf, PathBuf)> {
+        let config = self
+            .app_config
+            .lock()
+            .map_err(|_| CswError::Other("Usage environments unavailable".into()))?;
+        Ok((
+            self.provider.claude_desktop_default_dir(),
+            config.profiles_dir.clone(),
+        ))
+    }
+
     pub fn list_profiles(&self) -> Result<Vec<String>> {
         let profiles_dir = self.app_config.lock().unwrap().profiles_dir.clone();
         let mut names = config::list_profile_names(&profiles_dir)?;

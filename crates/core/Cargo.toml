@@ -16,6 +16,11 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 dirs = { workspace = true }
 humantime = "2.1"
+libc.workspace = true
+chrono.workspace = true
+crc32fast.workspace = true
+sha2.workspace = true
+zstd.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 trash = "5.2.6"

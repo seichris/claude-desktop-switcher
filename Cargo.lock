@@ -335,6 +335,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e228eec9be7c17ccb640b59b36a5cd805ea2a564a4c5e162c2f659fea30d3b96"
 dependencies = [
  "find-msvc-tools",
+ "jobserver",
+ "libc",
  "shlex",
 ]
 
@@ -566,7 +568,7 @@ dependencies = [
 
 [[package]]
 name = "csw-cli"
-version = "0.24.6-local.3"
+version = "0.24.6-local.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -578,24 +580,29 @@ dependencies = [
 
 [[package]]
 name = "csw-core"
-version = "0.24.6-local.3"
+version = "0.24.6-local.4"
 dependencies = [
  "anyhow",
+ "chrono",
+ "crc32fast",
  "csw-core",
  "dirs 7.0.0",
  "humantime",
+ "libc",
  "objc2-app-kit",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.21",
  "toml 1.1.2+spec-1.1.0",
  "trash",
+ "zstd",
 ]
 
 [[package]]
 name = "csw-desktop"
-version = "0.24.6-local.3"
+version = "0.24.6-local.4"
 dependencies = [
  "anyhow",
  "csw-core",
@@ -1747,6 +1754,16 @@ checksum = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264"
 dependencies = [
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "jobserver"
+version = "0.1.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
+dependencies = [
+ "getrandom 0.4.3",
+ "libc",
 ]
 
 [[package]]
@@ -4773,3 +4790,31 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[package]]
+name = "zstd"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
+dependencies = [
+ "zstd-safe",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "7.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64d80649ab6db9d9f6f9c80a40becd948eda4714a0a5ac8c4d157a32231c7882"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-sys"
+version = "2.1.1+zstd.1.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aeec9eaf2dffbbd09201e23bd0ffcbaa33bb8e9266a10734fd7ed90a85eca078"
+dependencies = [
+ "cc",
+ "pkg-config",
+]
