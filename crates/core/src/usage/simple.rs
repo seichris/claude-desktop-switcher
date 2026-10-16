@@ -83,11 +83,33 @@ fn matching_key(key: &[u8], url: &str) -> bool {
     let Ok(key) = std::str::from_utf8(key) else {
         return false;
     };
-    let Some((_, suffix)) = key.rsplit_once("https://") else {
-        return false;
+    // Chromium's grammar is credential-key/upload-key/[isolation-key]URL.
+    // Only GET-style upload key 0 is supported. A partition, when present,
+    // starts with _dk_ and ends at the final unescaped space; resource URLs
+    // cannot contain that delimiter. Never search for an embedded HTTPS URL.
+    // See net/http/http_cache.cc:GetResourceURLFromHttpCacheKey.
+    let resource = if let Some(rest) = key
+        .strip_prefix("1/0/")
+        .or_else(|| key.strip_prefix("0/0/"))
+    {
+        if rest.starts_with("_dk_") {
+            let Some((partition, resource)) = rest.rsplit_once(' ') else {
+                return false;
+            };
+            if partition.len() <= 4 || partition.bytes().any(|b| b.is_ascii_control() || b == 127) {
+                return false;
+            }
+            resource
+        } else {
+            rest
+        }
+    } else {
+        // Exact raw URL keys are harmless; unknown wrappers never match.
+        key
     };
-    suffix == &url[8..] || suffix.strip_suffix("?skip_spend=1") == Some(&url[8..])
+    resource == url || resource.strip_suffix("?skip_spend=1") == Some(url)
 }
+
 fn key(file: &mut File, len: u64) -> io::Result<Vec<u8>> {
     let header = read_at(file, 0, 24)?;
     let key_len = u32_at(&header, 12)? as usize;

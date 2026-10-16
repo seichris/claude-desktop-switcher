@@ -188,3 +188,16 @@ fn larger_than_supported_compression_windows_are_refused() {
     encoder.write_all(b"{}").unwrap();
     assert!(decode(&encoder.finish().unwrap()).is_err());
 }
+#[test]
+fn embedded_usage_urls_never_select_unrelated_bodies() {
+    let url = url();
+    for key in [
+        format!("1/0/https://unrelated.example/?next={url}"),
+        format!("https://unrelated.example/#next={url}"),
+        format!("1/0/_dk_https://unrelated.example https://unrelated.example/?next={url}"),
+        format!("garbage{url}"),
+        format!("1/9/{url}"),
+    ] {
+        assert!(!matching_key(key.as_bytes(), &url));
+    }
+}
