@@ -1945,8 +1945,8 @@ const DISCLAIMER = [
 // Fixed GitHub URLs for the privacy document (ja/en). Listed, like the footer
 // links (data-url, and data-url-en for the English UI), in docs/PRIVACY.md as
 // the complete set of URLs open_url may receive.
-const PRIVACY_URL_JA = 'https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/PRIVACY.md';
-const PRIVACY_URL_EN = 'https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/PRIVACY_EN.md';
+const PRIVACY_URL_JA = 'https://github.com/seichris/claude-desktop-switcher/blob/main/docs/PRIVACY.md';
+const PRIVACY_URL_EN = 'https://github.com/seichris/claude-desktop-switcher/blob/main/docs/PRIVACY_EN.md';
 // The releases page, where csw is published. The same URL as the footer's
 // update check (index.html), so it adds nothing to that list.
 const RELEASES_URL = 'https://github.com/seichris/claude-desktop-switcher/releases';
