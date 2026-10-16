@@ -2,7 +2,7 @@
 
 This fork was reviewed against upstream version 0.24.6 at
 `5892992dead8f9596c5291d87b0259d0b494f650`. The local build has version
-`0.24.6-local.3` and bundle identifier `com.seichris.claude-desktop-switcher`.
+`0.24.6-local.4` and bundle identifier `com.seichris.claude-desktop-switcher`.
 
 The source review found no explicit runtime credential exfiltration, Keychain
 access, telemetry or automatic updater. This is limited source evidence, not a
@@ -29,6 +29,13 @@ Claude accounts still run as the same macOS user.
   opening to the project's GitHub paths and remove inline script permission.
 - Direct the update button to this fork. Upstream downloads do not contain these
   local changes; inspect and rebuild future updates deliberately.
+- Show saved Claude usage for discovered environments, without a fixed account
+  list. Read only Desktop usage history and exact matching local usage-cache
+  responses. Show supported usage percentages, saved reset times and the source
+  observation time; mark stale and missing readings explicitly. Do not request
+  credentials, sign in, make network requests or modify environment data.
+  See the [usage guide](USER_GUIDE_EN.md#checking-saved-claude-usage) and
+  [read scope](PRIVACY_EN.md#local-files-read-for-claude-usage).
 
 ## Build and use
 
@@ -53,6 +60,9 @@ These checks are not a transactional snapshot or protection against malicious
 same-user filesystem changes racing an operation.
 
 ## Dependency check on 2026-10-15
+
+This is the dependency snapshot from the initial hardening review, before the
+local-usage addition. Its package counts do not describe later lockfile changes.
 
 OSV's batch API was queried for all 454 registry package versions in Cargo.lock.
 The macOS normal/build graph contained 263 distinct package entries. The glib

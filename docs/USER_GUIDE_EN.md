@@ -119,7 +119,7 @@ The Claude Code (CLI) sign-in is managed separately from the desktop app's sign-
 
 This feature is an addition in local builds of this fork. It is not included in the upstream downloads linked in the installation steps above.
 
-The usage view lists Existing Claude and every environment CSW discovers. It works with any environment names and any number of environments. It shows the saved five-hour and weekly usage percentages, reset times when available, and when Claude last recorded the reading. Additional usage windows appear when the saved response includes them.
+The usage view lists Existing Claude and the environments CSW discovers, without a fixed account list. It shows the saved five-hour and weekly usage percentages, reset times when available, and when Claude last recorded the reading. Supported additional usage windows appear when the saved response includes them.
 
 CSW reads only the local usage history and matching usage responses already cached by the Claude Desktop App. It needs no extra sign-in, no Claude Code sign-in, and no access to passwords, tokens, cookies, or the Keychain. Checking the local cache again only rereads those records; it does not contact Claude's servers or launch Claude.
 

@@ -20,9 +20,9 @@ CSWはインターネットに接続しません。接続する仕組み自体�
 - `https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/USER_GUIDE.md`
 - `https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/USER_GUIDE_EN.md`
 - `https://github.com/matsumotory/claude-desktop-switcher/issues`
-- `https://github.com/matsumotory/claude-desktop-switcher/releases`
-- `https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/PRIVACY.md`
-- `https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/PRIVACY_EN.md`
+- `https://github.com/seichris/claude-desktop-switcher/releases`
+- `https://github.com/seichris/claude-desktop-switcher/blob/main/docs/PRIVACY.md`
+- `https://github.com/seichris/claude-desktop-switcher/blob/main/docs/PRIVACY_EN.md`
 
 更新の確認も同じ仕組みです。CSWが新しいバージョンを問い合わせるのではなく、GitHubのリリースページをブラウザで開くだけです。
 

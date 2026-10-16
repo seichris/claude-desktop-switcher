@@ -20,9 +20,9 @@ The single exception is the links at the bottom of the window (User guide, Repor
 - `https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/USER_GUIDE.md`
 - `https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/USER_GUIDE_EN.md`
 - `https://github.com/matsumotory/claude-desktop-switcher/issues`
-- `https://github.com/matsumotory/claude-desktop-switcher/releases`
-- `https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/PRIVACY.md`
-- `https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/PRIVACY_EN.md`
+- `https://github.com/seichris/claude-desktop-switcher/releases`
+- `https://github.com/seichris/claude-desktop-switcher/blob/main/docs/PRIVACY.md`
+- `https://github.com/seichris/claude-desktop-switcher/blob/main/docs/PRIVACY_EN.md`
 
 Update checks work the same way: CSW never queries for new versions; it simply opens the GitHub releases page in your browser.
 
