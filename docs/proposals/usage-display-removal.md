@@ -8,6 +8,8 @@ related_issues: []
 
 # 環境ごとの利用量表示の撤去と、その判断記録
 
+本書は2026年7月の調査と撤去判断を残した履歴である。2026年10月にはDesktopが保存するローカル記録を読み取る方法を採用した。現在の設計は[local-usage-cache.md](local-usage-cache.md)に記録する。以前のstatusline連携や、認証情報を使った問い合わせを復活させるものではない。
+
 ## 背景
 
 v0.17.0 / v0.17.1 で、サイドバーの各環境行に Claude のセッション上限（5時間）と週間上限の使用率を表示する機能を実装した（[usage-bars-statusline.md](usage-bars-statusline.md)）。データ源は Claude Code の statusline 連携で、通信ゼロ・認証情報非接触を守っていた。

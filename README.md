@@ -42,6 +42,7 @@ How should you partition your environments on a single PC? You can flexibly adju
 
 - **Integrated Management for GUI & CLI**: Centrally manages the environments behind the Claude Desktop App and Claude Code (CLI). Switch GUI environments by selecting one; sync the CLI to the same isolated environment by running a command in a separate terminal.
 - **Customizable Isolation**: You can choose which settings to share and which data to separate based on your use case.
+- **Saved Claude usage in this fork**: Local builds show each discovered environment's saved usage percentages, available resets, and last-checked time. Stale and missing data are explicit. The reader uses only existing Desktop usage files and matching local cache responses, with no network requests or credential access. This addition is not part of the upstream downloads linked above; see [the local-cache guide](docs/USER_GUIDE_EN.md#checking-saved-claude-usage).
 - **Zero-Impact Isolation**: It does not arbitrarily overwrite your Mac's global system settings. Settings are applied locally only to the apps or specific terminal tabs launched by this tool. It makes absolutely no changes to your existing default Claude environment.
 
 ## Usage
@@ -152,6 +153,7 @@ MIT
 
 - **GUIとCLIの統合環境管理**：ClaudeデスクトップアプリとClaude Code（CLI）の背後の環境を一元管理します。GUIの環境を選んで切り替えるほか、別に開いたターミナルでコマンドを実行すれば、CLIも同じ隔離環境へ同期できます。
 - **分離度のカスタマイズ**：共有したい設定と分けたいデータを用途に合わせて選択可能です。
+- **このフォークで保存済みのClaudeの利用量を表示**：ローカルビルドでは、見つかった各環境の使用率、記録にあるリセット時刻、最終確認時刻を表示し、古い記録と未取得を明示します。既存のDesktopの利用量ファイルと対応するローカルキャッシュだけを読み、通信や認証情報の読み取りは行いません。この追加機能は、上で案内している上流の配布版には含まれません。[ローカル記録のガイド](docs/USER_GUIDE.md#保存済みのclaudeの利用量を確認する)を参照してください。
 - **局所的な環境の適用 (Zero-Impact Isolation)**：Mac本体のシステム設定を無差別に上書きすることはありません。設定は本ツールから起動したアプリや特定のターミナルタブに対してのみ局所的に適用されます。既存のClaude環境には一切変更を加えません。
 
 ### 使用方法
