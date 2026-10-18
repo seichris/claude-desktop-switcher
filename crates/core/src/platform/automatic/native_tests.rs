@@ -18,7 +18,7 @@ impl NativePermit {
         let metadata = fs::symlink_metadata(&directory).unwrap();
         assert!(metadata.is_dir() && metadata.uid() == unsafe { libc::geteuid() });
         assert_eq!(metadata.mode() & 0o777, 0o700);
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
@@ -27,16 +27,25 @@ impl NativePermit {
             .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(directory.join("visible-test.lock"))
             .unwrap();
+        Self::claim_and_stamp(file, |file| {
+            // SAFETY: live owned descriptor, advisory nonblocking test lock.
+            assert_eq!(
+                unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+                0,
+                "another visible fixture is running; no dialog opened"
+            );
+        })
+    }
+
+    fn claim_and_stamp(mut file: File, claim: impl FnOnce(&File)) -> Self {
         let metadata = file.metadata().unwrap();
         assert!(metadata.is_file() && metadata.nlink() == 1);
         assert_eq!(metadata.uid(), unsafe { libc::geteuid() });
         assert_eq!(metadata.mode() & 0o777, 0o600);
-        // SAFETY: live owned file descriptor, advisory nonblocking test lock.
-        assert_eq!(
-            unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
-            0,
-            "another visible fixture is running; no dialog opened"
-        );
+        claim(&file);
+        // Another invocation may have stamped this file while we were delayed
+        // before flock. Only metadata observed while holding the lock is fresh.
+        let metadata = file.metadata().unwrap();
         assert!(metadata.len() == 0 || metadata.len() == 8);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -57,6 +66,38 @@ impl NativePermit {
         file.sync_all().unwrap();
         Self(file)
     }
+}
+
+#[test]
+fn cooldown_rechecks_metadata_after_claim() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("lock");
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .unwrap();
+    // Deterministically model another invocation stamping the initially empty
+    // file while this invocation is delayed before it acquires the lock.
+    let outcome = std::panic::catch_unwind(|| {
+        NativePermit::claim_and_stamp(file, |_| {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            fs::write(&path, now.to_le_bytes()).unwrap();
+        })
+    });
+    let Err(error) = outcome else {
+        panic!("stale pre-lock metadata bypassed the cooldown")
+    };
+    let message = error
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| error.downcast_ref::<&str>().copied());
+    assert!(message.is_some_and(|message| message.contains("visible test cooldown")));
 }
 
 impl Drop for NativePermit {
