@@ -169,17 +169,41 @@ async function main() {
   }
 
   async function checkLandingPages() {
+    async function assertLayout(lang, width, menuOpen) {
+      const result = (await evalv(`(()=>{
+        const visible=e=>{const s=getComputedStyle(e);return s.visibility!=='hidden'&&s.display!=='none'&&e.getBoundingClientRect().width>0;};
+        const metrics=e=>{const s=getComputedStyle(e);return {tag:e.tagName,cls:e.className,text:e.textContent.slice(0,60),
+          clientWidth:e.clientWidth,scrollWidth:e.scrollWidth,rectWidth:e.getBoundingClientRect().width,
+          visibility:s.visibility,display:s.display,transform:s.transform};};
+        const controls=[...document.querySelectorAll('h1,h2,h3,.faq-q,button,.btn,.nav-links a')].filter(visible);
+        const nav=document.querySelector('.nav-links');
+        const rect=nav?.getBoundingClientRect();
+        return {lang:document.documentElement.lang,width:innerWidth,page:document.documentElement.scrollWidth,
+          // clientWidth and scrollWidth use the same untransformed layout space.
+          overflow:controls.filter(e=>e.clientWidth>0&&e.scrollWidth>e.clientWidth+2).map(metrics),
+          menu:{open:document.body.classList.contains('nav-open'),expanded:document.querySelector('.nav-toggle')?.getAttribute('aria-expanded'),
+            visible:!!nav&&visible(nav),inside:!!rect&&rect.left>=0&&rect.right<=innerWidth,
+            controls:nav?[...nav.querySelectorAll('a,button')].filter(visible).map(metrics):[]}};
+      })()`)).result?.value;
+      if (!result || result.width !== result.page || result.overflow.length || !result.lang.startsWith(lang)
+          || (menuOpen && (!result.menu.open || result.menu.expanded !== 'true' || !result.menu.visible || !result.menu.inside || !result.menu.controls.length))) {
+        throw new Error(`landing page layout failed (${lang}, ${width}, menu ${menuOpen ? 'open' : 'closed'}): ${JSON.stringify(result)}`);
+      }
+    }
     for (const lang of ['en', 'ja']) {
       for (const width of [360, 390, 1024, 1200, 1440]) {
         await cmd('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false });
         await cmd('Page.navigate', { url: `http://127.0.0.1:${PORT}/site/${lang === 'ja' ? 'ja/' : ''}` });
         await sleep(700);
-        const result = (await evalv(`(()=>({lang:document.documentElement.lang,width:innerWidth,page:document.documentElement.scrollWidth,
-          overflow:[...document.querySelectorAll('h1,h2,h3,.faq-q,button,.btn')].filter(e=>{
-            const r=e.getBoundingClientRect();return r.width>0&&e.scrollWidth>Math.ceil(r.width)+2;
-          }).map(e=>({tag:e.tagName,cls:e.className,text:e.textContent.slice(0,60)}))}))()`)).result?.value;
-        if (!result || result.width !== result.page || result.overflow.length || !result.lang.startsWith(lang)) {
-          throw new Error(`landing page layout failed (${lang}, ${width}): ${JSON.stringify(result)}`);
+        await assertLayout(lang, width, false);
+        if (width <= 768) {
+          // Exercise the shipped menu handler rather than forcing a CSS class.
+          const clicked = (await evalv(`(()=>{const toggle=document.querySelector('.nav-toggle');
+            if(!toggle||getComputedStyle(toggle).display==='none')return false;toggle.click();return true;})()`)).result?.value;
+          if (!clicked) throw new Error(`mobile menu toggle unavailable (${lang}, ${width})`);
+          // The final child has a 280ms delay plus a 400ms transition.
+          await sleep(850);
+          await assertLayout(lang, width, true);
         }
       }
     }
