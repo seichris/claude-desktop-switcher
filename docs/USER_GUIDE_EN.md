@@ -93,6 +93,12 @@ Here is the daily usage flow after setup. No manual configuration is required.
 > **Note: running environments at the same time**
 > Environments created with "separate conversations and memory too" or "separate the account only" share settings, so they open one at a time to avoid configuration conflicts. To go back to your personal setup, quit the running Claude, select "Existing Claude" in the sidebar and press "Launch Existing Claude". It returns to your Existing Claude and opens it. An environment set to "separate everything" shares nothing, so you can open it alongside a running Claude with "Launch alongside" in the detail view, without quitting.
 
+### Automatic quitting is not available yet
+
+The automatic-quit prototype is blocked by security review and has not been merged or installed. In Claude 2.42304.0, the protection that prevents quitting during Code and Cowork work is installed asynchronously. The process's launch time, its finished-launching flag, the app signature and a saved launch record do not prove that this protection is ready. Accessibility permission alone does not close that gap.
+
+Until a reliable readiness check is verified for the exact running process, this candidate refuses automatic quitting with `automatic_guard_unverified`. It sends no quit request and presses no quit-dialog button. Let running work and input waits finish, then quit Claude manually before launching another environment. You do not need to grant Accessibility for current use. Existing separate sign-ins, local Code sharing and CLI behavior are unchanged. See the [development proposal](proposals/automatic-account-switch.md) for the blocker and next verification requirements.
+
 ### Scenario B: Using Claude Code in the terminal
 There are two kinds of terminal, and they need different steps. In either case, the first time you use Claude Code in an environment, you need to sign in to the CLI once (see "First time only: signing in to Claude Code" below).
 

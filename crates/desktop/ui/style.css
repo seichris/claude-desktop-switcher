@@ -415,6 +415,9 @@ code, .code-line { font-family: var(--font-mono); }
    [hidden]{display:none}), so re-assert it like .view[hidden] does. */
 .dmg-banner[hidden],
 .takeover-banner[hidden] { display: none; }
+.automatic-banner .btn[hidden],
+.automatic-banner .dmg-banner-actions[hidden] { display: none; }
+.automatic-banner .dmg-banner-actions { flex-wrap: wrap; justify-content: flex-end; }
 .dmg-banner,
 .takeover-banner {
   display: flex;

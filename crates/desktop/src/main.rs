@@ -27,6 +27,7 @@ struct AppState {
     /// transition cannot be observed, so no stale notice survives.
     takeover_from: std::sync::Mutex<Option<String>>,
     usage_cache: Arc<std::sync::Mutex<usage_cache::ReadCache<Vec<csw_core::usage::UsageReport>>>>,
+    automatic_switcher: Arc<csw_core::switcher::automatic::AutomaticSwitcher>,
 }
 
 // Tauri commands exposed to frontend settings UI
@@ -361,26 +362,61 @@ async fn switch_profile(
     no_launch: bool,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<(), String> {
-    let switcher = ContextSwitcher::new(state.provider.clone(), state.profile_manager.clone());
-    switcher.switch_to(&name).map_err(|e| e.to_string())?;
+) -> Result<csw_core::switcher::automatic::Status, String> {
+    enqueue_switch(&app, &state, &name, !no_launch)
+}
 
-    // Update system tray menu
-    update_tray_menu(&app)?;
+fn enqueue_switch(
+    app: &AppHandle,
+    state: &AppState,
+    name: &str,
+    launch: bool,
+) -> Result<csw_core::switcher::automatic::Status, String> {
+    let ticket = state
+        .automatic_switcher
+        .begin(&state.profile_manager, name, launch)
+        .map_err(|_| "automatic_pending_or_invalid".to_owned())?;
+    let coordinator = state.automatic_switcher.clone();
+    let manager = state.profile_manager.clone();
+    let provider = state.provider.clone();
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        coordinator.run(ticket, manager, provider);
+        let _ = update_tray_menu(&handle);
+        use tauri::Emitter;
+        if let Ok(status) = coordinator.status() {
+            let _ = handle.emit("automatic-switch", status);
+        }
+    });
+    state
+        .automatic_switcher
+        .status()
+        .map_err(|_| "automatic_failed".to_owned())
+}
 
-    // Auto-launch after switching, including back to the default ("既存の Claude").
-    // For default this resolves to the standard data dirs, so it is equivalent to a
-    // normal Finder/Dock launch; `open -n` starts a fresh LaunchServices process that
-    // inherits no CSW state, and switching is already refused while Claude is running.
-    if !no_launch {
-        let profile = state
-            .profile_manager
-            .get_profile(&name)
-            .map_err(|e| e.to_string())?;
-        let _ = csw_core::switcher::desktop::launch_desktop(&profile, state.provider.as_ref());
+#[tauri::command]
+fn get_automatic_switch_status(
+    state: State<'_, AppState>,
+) -> Result<csw_core::switcher::automatic::Status, String> {
+    state
+        .automatic_switcher
+        .status()
+        .map_err(|_| "automatic_failed".to_owned())
+}
+
+/// Permission is requested only by this explicit settings-window button.
+#[tauri::command]
+fn request_accessibility_permission() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        csw_core::platform::automatic::request_permission()
+            .map(|()| csw_core::platform::automatic::trusted())
+            .map_err(|_| "automatic_accessibility_required".to_owned())
     }
-
-    Ok(())
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(false)
+    }
 }
 
 #[tauri::command]
@@ -814,6 +850,7 @@ fn main() {
         profile_manager,
         takeover_from: std::sync::Mutex::new(None),
         usage_cache: Arc::new(std::sync::Mutex::new(usage_cache::ReadCache::new())),
+        automatic_switcher: Arc::new(csw_core::switcher::automatic::AutomaticSwitcher::default()),
     };
 
     tauri::Builder::default()
@@ -856,24 +893,10 @@ fn main() {
                         let _ = app.emit("whereami", payload);
                     } else if let Some(profile_name) = id.strip_prefix("profile_") {
                         let state = app.state::<AppState>();
-                        let switcher = ContextSwitcher::new(
-                            state.provider.clone(),
-                            state.profile_manager.clone(),
-                        );
-
-                        if let Err(e) = switcher.switch_to(profile_name) {
-                            eprintln!("Failed to switch profile: {}", e);
-                        } else {
-                            let _ = update_tray_menu(app);
-                            // Auto-launch the newly active profile, including the
-                            // default ("既存の Claude"): for default this is the
-                            // standard data dir, equivalent to a normal launch.
-                            if let Ok(profile) = state.profile_manager.get_profile(profile_name) {
-                                let _ = csw_core::switcher::desktop::launch_desktop(
-                                    &profile,
-                                    state.provider.as_ref(),
-                                );
-                            }
+                        let _ = enqueue_switch(app, &state, profile_name, true);
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
                         }
                     }
                 })
@@ -995,6 +1018,8 @@ fn main() {
             get_profile_data_map,
             reveal_profile_dir,
             switch_profile,
+            get_automatic_switch_status,
+            request_accessibility_permission,
             set_profile_note,
             get_takeover_notice,
             dismiss_takeover_notice,

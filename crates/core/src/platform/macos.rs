@@ -96,19 +96,37 @@ impl PlatformProvider for MacOsProvider {
         if !app_path.exists() {
             return Err(CswError::DesktopNotInstalled);
         }
+        let previous_pids: Vec<u32> = self
+            .running_desktop_processes()?
+            .into_iter()
+            .map(|(pid, _)| pid)
+            .collect();
 
         let mut cmd = Command::new("/usr/bin/open");
         cmd.arg("-n").arg("-a").arg(&app_path);
+        // The reviewed native Code quit guard is disabled by a hidden launch.
+        // Explicitly override any inherited value; never infer it from ps or
+        // inspect the process environment, which can contain credentials.
+        cmd.arg("--env").arg("CLAUDE_DESKTOP_BACKGROUND_LAUNCH=0");
 
         if let Some(cli_dir) = cli_config_dir {
             cmd.arg("--env")
                 .arg(format!("CLAUDE_CONFIG_DIR={}", cli_dir.display()));
         }
 
-        cmd.arg("--args")
+        let status = cmd
+            .arg("--args")
             .arg(format!("--user-data-dir={}", user_data_dir.display()))
-            .spawn()
+            .status()
             .map_err(|e| CswError::Other(format!("Failed to launch Claude Desktop: {e}")))?;
+        if !status.success() {
+            return Err(CswError::Other("Failed to launch Claude Desktop".into()));
+        }
+
+        // Unknown vendor versions, startup inspection failures or an existing
+        // instance never gain proof. Normal launching remains available; the
+        // automatic quit adapter will refuse without a valid current proof.
+        let _ = super::automatic::record_safe_launch(self, user_data_dir, &previous_pids);
 
         Ok(())
     }

@@ -16,6 +16,7 @@ node scripts/appshot/gen-screenshots.mjs
 - 必要: Google Chrome、Node 21 以降 (global `WebSocket` / `fetch`)。
 - 出力 (日英10枚): 日本語は `ja_screen_onboarding.png` / `ja_screen_overview.png` / `ja_screen_create.png` / `ja_screen_usage.png` / `ja_hero.png`、英語は `screen_onboarding.png` / `screen_overview.png` / `screen_create.png` / `screen_usage.png` / `hero.png`。すべて `website/assets/` に書き出す。
 - 手元の下見では、`CSW_APPSHOT_OUT=/tmp/csw-appshot-preview node scripts/appshot/gen-screenshots.mjs`で出力先を変える。
+- 未出荷の自動終了候補版は、通常の10枚に加えて、安全性を確認できず手動終了を案内する`screen_automatic_blocked.png`と`ja_screen_automatic_blocked.png`も生成する。
 
 ## 出荷する画像はmacOSランナーで撮る
 

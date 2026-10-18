@@ -1,8 +1,9 @@
 # Local security build
 
 This fork was reviewed against upstream version 0.24.6 at
-`5892992dead8f9596c5291d87b0259d0b494f650`. The local build has version
-`0.24.6-local.5` and bundle identifier `com.seichris.claude-desktop-switcher`.
+`5892992dead8f9596c5291d87b0259d0b494f650`. The installed local build remains
+`0.24.6-local.5` with bundle identifier `com.seichris.claude-desktop-switcher`.
+The `0.24.6-local.6` development candidate is unshipped and has not been installed.
 
 The source review found no explicit runtime credential exfiltration, Keychain
 access, telemetry or automatic updater. This is limited source evidence, not a
@@ -56,6 +57,16 @@ binary, or invoke `./target/release/csw` from the checkout.
 
 An ad-hoc signature verifies the local bundle's consistency; it is not publisher
 identity or Apple notarization. Do not disable Gatekeeper globally.
+
+Automatic quitting is blocked by security review and is not available. The
+candidate refuses it with `automatic_guard_unverified` before requesting a quit
+or pressing a native dialog button. Claude 2.42304.0 installs its working-session
+quit guard asynchronously, and no reliable external signal currently proves that
+the guard is ready in the exact running process. Launch age, finished-launching,
+app signature and launch provenance are insufficient. Do not install this
+candidate as a completed automatic-switching feature or grant Accessibility for
+current use. Keep using manual quitting. See the
+[development proposal](proposals/automatic-account-switch.md).
 
 Create a **New environment** using **Separate everything** for each account and
 sign in through the official Claude app. Existing Claude remains the default.
