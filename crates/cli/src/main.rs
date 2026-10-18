@@ -21,6 +21,20 @@ enum Commands {
     /// Initialize Claude Desktop Switcher (create ~/.context-switcher-claude/)
     Init,
 
+    /// Share complete local Desktop Code stores using existing Desktop logins.
+    /// All destinations are overwritten after a backup. Quit Claude first.
+    ShareCode {
+        /// Starting environment; subsequent switches carry forward the changed store
+        #[arg(long, default_value = "default")]
+        source: String,
+        /// Destination environments, already sharing local transcripts and history
+        #[arg(required = true)]
+        environments: Vec<String>,
+        /// Explicitly allow replacing the destinations' current local Code stores
+        #[arg(long, required = true)]
+        replace: bool,
+    },
+
     /// Manage environments
     Profile {
         #[command(subcommand)]
@@ -148,6 +162,26 @@ fn main() -> anyhow::Result<()> {
     let provider: Arc<dyn csw_core::platform::PlatformProvider> = Arc::from(create_provider()?);
 
     match cli.command {
+        Commands::ShareCode {
+            source,
+            environments,
+            replace: _,
+        } => {
+            let manager = ProfileManager::new(provider.clone())?;
+            let backup = csw_core::native_code::configure(
+                &manager,
+                provider.as_ref(),
+                &source,
+                &environments,
+            )?;
+            println!(
+                "Complete local Code sharing enabled. Backup: {}",
+                backup.display()
+            );
+            println!(
+                "Launch environments normally in Switcher. No Claude Code CLI login is required."
+            );
+        }
         Commands::Init => {
             println!("{}", "Initializing Claude Desktop Switcher...".bold());
             let manager = ProfileManager::new(provider.clone())?;

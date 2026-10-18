@@ -152,6 +152,12 @@ These are records for an environment, not verification of the account currently 
 
 ---
 
+### Complete local Code sharing in this fork
+
+With this fork's `csw` command installed, environments that already share transcripts, project memory and input history can also share complete Desktop Code stores. Quit every Claude Desktop instance, then run `csw share-code --source default --replace Research Development`, replacing the example names with your environment names. Each environment must have opened Code once and have one account/workspace directory. The source's complete stores replace the destinations after every original store has been backed up. Saved Code permissions, connector references, scheduled-task definitions, archive/deletion records and worktree leases are included.
+
+After setup, launch environments normally in Switcher. Existing Desktop logins stay separate; no Claude Code CLI login step is added. Before launching a participant, Switcher compares the complete stores with the previous synchronization and carries forward the one that changed. If several changed independently, it stops instead of overwriting a conflict. This takes effect through Claude's normal launch, rather than live updates in another running window. Use one participant at a time. Cloud Projects, cloud Chat conversations and Web-side custom groups are outside this feature. Backups and their locations manifest remain under `~/.context-switcher-claude/native-code-backups/`.
+
 ## 4. FAQ
 
 **Q. Share / isolate: relative to what?**

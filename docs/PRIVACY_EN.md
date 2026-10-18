@@ -28,12 +28,14 @@ Update checks work the same way: CSW never queries for new versions; it simply o
 
 ## Where CSW writes
 
-CSW writes files only inside its own folder, `~/.context-switcher-claude/`. The one exception is deleting an environment, which moves that environment's folder, as is, to the macOS Trash. Nothing new is written out; only the environment folders listed below are ever moved.
+By default, CSW writes inside its own folder, `~/.context-switcher-claude/`. Deleting an environment moves its folder to the macOS Trash. Explicitly enabling complete local Code sharing additionally permits replacing the three Code stores described below in participating Desktop environments, including Existing Claude. Sign-in storage is outside this operation.
 
 | Path | Contents |
 |---|---|
 | `~/.context-switcher-claude/config.toml` | The name of the currently selected environment |
 | `~/.context-switcher-claude/session.toml` | The environments that were open together when you last quit them all |
+| `~/.context-switcher-claude/native-code.toml` and `native-code.lock` | An explicitly enabled local Code sharing group, change fingerprints and an operation lock |
+| `~/.context-switcher-claude/native-code-backups/` | Private snapshots before changed synchronizations, their locations manifest and the preceding sharing configuration |
 | `~/.context-switcher-claude/profiles/<name>/profile.toml` | That environment's settings (name, note, creation record, and sharing mode) |
 | `~/.context-switcher-claude/profiles/<name>/state.toml` | When CSW first and last launched that environment |
 | `~/.context-switcher-claude/profiles/<name>/desktop-data/` | That environment's data for the Claude Desktop App |
@@ -69,6 +71,14 @@ The reader keeps each environment separate even when two accounts belong to the 
 Only the environment name, usage percentages, times, source, and display state reach the screen. Raw cache contents, response URLs, and organization identifiers are not returned to the screen, logged, or saved by CSW. Usage reports are held in memory rather than written as another cache.
 
 The last-checked time is the saved observation's time. A reading over 30 minutes old or past a displayed reset is marked stale. Missing values remain unavailable, and a passed reset never changes a saved percentage to zero. A cache can survive a change of sign-in, so a reading does not prove which account is signed in now. The official Claude app remains the place to verify current usage and account identity.
+
+## Complete local Code sharing
+
+This fork provides the opt-in operation `csw share-code --source default --replace <environment>...` for environments that already share local transcripts, project memory and input history. It reads and replaces only `claude-code-sessions/<account>/<workspace>/`, `git-worktrees.json`, and `ccd-session-presets.json` below their Desktop data roots. It copies complete records, including saved Code permissions, connector references, scheduled-task definitions, deletion markers and worktree bookkeeping. It maps the Code presets' account key to each destination. It never opens account configuration, cookies, browser storage or the Keychain for this operation. There are no network requests or Claude Code CLI sign-ins.
+
+All Claude Desktop instances must be closed. Each participant must have one unambiguous account/workspace directory. Every store is backed up before any replacement. Symbolic links, hard links, special files, invalid JSON, oversized inputs and independent changes in more than one environment are refused. The normal Switcher launch flow carries forward the complete store changed since the preceding synchronization. It does not inject data into an already running sidebar. Launching outside CSW does not run this synchronization.
+
+This shares local Code content and saved Code behavior, including worktree cleanup state and scheduled tasks. It does not share cloud Projects, cloud Chat history, subscriptions, connector sign-ins or Web-side custom groups. Use one participating environment at a time. The initial source and overwritten destinations remain in local backups; backups are not silently pruned.
 
 ## About duplicating an environment
 

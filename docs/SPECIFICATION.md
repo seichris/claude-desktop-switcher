@@ -16,6 +16,12 @@ Claudeデスクトップアプリは、ネイティブで複数アカウント�
 
 デスクトップアプリのログインは各環境のディレクトリ内に保持され、Claude CodeのログインはClaude Code自身が`CLAUDE_CONFIG_DIR`ごとに分けてmacOSのキーチェーンに保持します。どちらも環境ごとに分かれるため、CSWが認証情報ストアを操作することなく分離が成立します。GUI側の環境分離にCLI側の設定ディレクトリ（環境変数`CLAUDE_CONFIG_DIR`）を連動させ、特定の設定ファイル（`CLAUDE.md`等）だけを共有・分離・コピーで柔軟に切り替えられる構造を提供します。ターミナルを使わない利用者でもGUIだけでスイートを分けて使え、開発者はCLI連携まで一貫させられます。
 
+### ローカルCode全体の共有（このフォークの明示的な追加設定）
+
+通常の共有プリセットとは独立して、`csw share-code --source default --replace <環境名>...`で、すでに会話履歴・メモリ・入力履歴を共有している環境のDesktop Codeストア全体を同期する。対象は`claude-code-sessions/<account>/<workspace>/`、`git-worktrees.json`、`ccd-session-presets.json`。レコードのフィールドは選別せず、Codeプリセットのアカウントキーだけを共有先へ対応付ける。全Claude Desktopの終了時にのみ動作し、起動経路は変更しない。追加のClaude Code CLIサインインは不要。
+
+初回は明示した元環境で上書きし、以後は切替前に指紋を比較して変更された1環境の完全なストアを引き継ぐ。複数環境の独立した変更、曖昧なアカウント・組織、リンク、ハードリンク、特殊ファイル、壊れたJSON、過大な入力を拒否する。全ストアの非公開バックアップ後に置き換え、通常のエラーでは復元する。認証、Cookie、ブラウザストレージ、Chat/Cowork、利用量キャッシュ、クラウドの一覧には触れない。参加環境と指紋は`native-code.toml`、バックアップは`native-code-backups/`に保存する。詳しくは[shared-desktop-code.md](proposals/shared-desktop-code.md)を参照。
+
 ## 2. システムアーキテクチャ
 本アプリはRustのワークスペースで構成され、3つのクレートに分割されています。
 
