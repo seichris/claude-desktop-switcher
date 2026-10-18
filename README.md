@@ -56,6 +56,8 @@ Standard environment management is available in the settings window. This fork's
 2. **Create Environments**: In the settings window, create independent environments such as "Work" or "Research" with a single click.
 3. **Launch in Isolated Environment**: Select an environment and press "Launch this environment" (`この環境を起動`); that environment's Claude Desktop App launches against its own isolated directory. Environments that share settings open one at a time, so quit a running Claude before launching another. An environment set to "separate everything" shares nothing, so you can open it alongside a running Claude with "Launch alongside" (`重複して起動`), without quitting.
 
+Automatic quitting is not available. The development prototype is blocked until Claude's quit guard can be proven ready for the exact running process. Keep using manual quitting; no Accessibility grant is needed for current use. See the [development proposal](docs/proposals/automatic-account-switch.md).
+
 ### Terminal (Claude Code) Integration
 
 There are two kinds of terminal, and they need different steps.
@@ -167,6 +169,8 @@ MIT
 1. **インストール＆起動**：`Claude-Desktop-Switcher.app`をアプリケーションフォルダに入れて起動。設定ウインドウが開きます。
 2. **環境の作成**：設定ウインドウで、ワンクリックで「業務」「研究」など、独立した環境を作成。
 3. **分離環境での起動**：環境を選んで「この環境を起動」を押すと、その環境専用の隔離ディレクトリでClaudeデスクトップアプリが起動します。設定を共有する環境は衝突を防ぐため一度に1つずつなので、起動する前に起動中のClaudeを終了してください。「すべて分ける」で作った環境は何も共有しないため、起動中のClaudeを終了せず「重複して起動」で並べて開けます。
+
+自動終了は利用できません。Claudeの終了保護が、対象プロセスで準備済みであることを証明できるまで、開発中の試作を停止しています。引き続き手動で終了してください。現在の利用にアクセシビリティの許可は不要です。詳しくは[開発提案](docs/proposals/automatic-account-switch.md)を参照してください。
 
 #### ターミナル（Claude Code）連携
 

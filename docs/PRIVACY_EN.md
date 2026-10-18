@@ -8,7 +8,7 @@ This document is kept in sync with the implementation. Whenever the implementati
 
 1. **No internet communication.** CSW sends no usage data and performs no auto-update requests.
 2. **No reading of passwords or sign-in data.** CSW never touches the macOS Keychain that stores your passwords, and never opens the contents of sign-in tokens or browser cookies. When you duplicate an environment, sign-in files that the duplicate copies, such as the Claude Desktop App's cookies, are copied as they are, like any other file, without being opened. See "About duplicating an environment" below for details.
-3. **Limited, documented local reads.** Sharing and copying touch only the items you choose. The usage view additionally reads the Claude Desktop App's saved usage history and exact matching usage-cache responses. It does not read conversations or sign-in data to obtain usage, and never changes the existing Claude data.
+3. **Limited, documented local reads.** Sharing and copying touch only the items you choose. The usage view additionally reads the Claude Desktop App's saved usage history and exact matching usage-cache responses. It does not read conversations or sign-in data to obtain usage, and never changes the existing Claude data. The unshipped automatic-quit candidate can additionally record the installed Claude app identity and process launch time. Its quit and Accessibility-dialog operations are disabled by the readiness gate described below.
 4. **Zero impact by default.** CSW rewrites no shell configuration or OS-level environment variables. Existing Claude is modified only when you explicitly enable complete local Code sharing, which replaces its Code stores while excluding sign-in storage. Launching without CSW uses the stores already present and does not synchronize them.
 
 ## About network access
@@ -17,9 +17,9 @@ CSW does not connect to the internet and has no built-in facility to do so.
 
 The single exception is the links at the bottom of the window (User guide, Report an issue, Check for updates), the "See how to verify" button in the About screen, and the "Open releases page" button that shows where to get the csw command. Pressing one hands a predetermined GitHub URL to macOS, which opens it in your default browser. The browser communicates; CSW itself does not. "User guide" and "See how to verify" open the Japanese or English version of their document, matching the display language. "Open releases page" appears in the first-run guide, the terminal section of the detail screen and the isolation check results, and opens the same releases page as "Check for updates". The URLs are fixed to the following six, and the implementation additionally rejects any URL that is not `https`.
 
-- `https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/USER_GUIDE.md`
-- `https://github.com/matsumotory/claude-desktop-switcher/blob/main/docs/USER_GUIDE_EN.md`
-- `https://github.com/matsumotory/claude-desktop-switcher/issues`
+- `https://github.com/seichris/claude-desktop-switcher/blob/main/docs/USER_GUIDE.md`
+- `https://github.com/seichris/claude-desktop-switcher/blob/main/docs/USER_GUIDE_EN.md`
+- `https://github.com/seichris/claude-desktop-switcher/issues`
 - `https://github.com/seichris/claude-desktop-switcher/releases`
 - `https://github.com/seichris/claude-desktop-switcher/blob/main/docs/PRIVACY.md`
 - `https://github.com/seichris/claude-desktop-switcher/blob/main/docs/PRIVACY_EN.md`
@@ -34,6 +34,7 @@ By default, CSW writes inside its own folder, `~/.context-switcher-claude/`. Del
 |---|---|
 | `~/.context-switcher-claude/config.toml` | The name of the currently selected environment |
 | `~/.context-switcher-claude/session.toml` | The environments that were open together when you last quit them all |
+| `~/.context-switcher-claude/automatic-switch/safe-launch.json` and `.proof-*` | The unshipped candidate's private launch record and temporary files: process ID, launch time, managed data directory and reviewed app identity; insufficient to authorize quitting |
 | `~/.context-switcher-claude/native-code.toml` and `native-code.lock` and `.native-code.toml-*` | An explicitly enabled local Code sharing group, change fingerprints and an operation lock |
 | `~/.context-switcher-claude/native-code-journal.json` and `.csw-write-*` | Transaction recovery metadata and private temporary configuration files |
 | `~/.context-switcher-claude/native-code-launch-pending` | A launch reservation that blocks synchronization until Claude startup is observed or explicitly cleared |
@@ -54,7 +55,7 @@ In addition, the settings window stores three records for its display in the app
   3. **Copying**: for items you set to Copy when creating or duplicating an environment, it reads those files and copies them into the new environment. Only the items you chose are read, and the existing Claude's side is never modified.
   4. **Saved usage**: the usage view reads the Desktop files listed below. It does not read Claude Code's folder for usage.
   5. **Explicit complete local Code sharing**: the Code stores described below are read, backed up and replaced in every participant, including Existing Claude. Sign-in storage is excluded.
-- To tell which environment a running Claude is using, CSW reads the list of running processes and their launch arguments. It reads nothing else about those processes and no communication contents.
+- To tell which environment a running Claude is using, CSW reads the list of running processes and their launch arguments. The unshipped candidate can also check a newly launched target process's launch time and app identity for its private launch record, as described below. It does not read process memory, environment variables or communication contents.
 - The identifier of the frontmost application is read only when you press "Check the current environment" in the menu bar icon's menu, to answer which environment the Claude in front is using. Only the process identifier and its launch arguments are read; screen contents and window titles are never read. CSW never polls for it.
 - To check whether a CSW installer disk image is still mounted, CSW reads the list of mounted disk images with `hdiutil` when it starts and when you press "Eject". Only each disk image's file path and mount points are read. CSW picks out its own disk images by name and ignores all others, and it never reads the contents of any disk image.
 
@@ -87,6 +88,18 @@ Quit all Claude Desktop instances and run `csw unshare-code` to disable subseque
 
 The launch reservation remains if startup is not observed. After quitting every Claude Desktop instance, `csw unshare-code` clears that reservation and disables synchronization. Reconfigure with an explicitly chosen source to resume. If a copy was interrupted, its journal completes the recorded intended copy before disabling; original stores remain in backups.
 
+## Disabled automatic-quit prototype
+
+The automatic-quit prototype is blocked by security review, has not been merged or installed, and is not an available feature. This candidate rejects automatic quitting with `automatic_guard_unverified` before requesting a native quit or inspecting or pressing native quit-dialog controls. No Accessibility grant is needed for current use. Let current work and input waits finish and quit Claude manually before changing environments. The installed local build remains `0.24.6-local.5`.
+
+Claude 2.42304.0 installs its working-session quit guard asynchronously. A launch record, process age, the finished-launching flag and a verified vendor build do not establish that the guard is ready for that exact process. Allowing Accessibility does not solve this missing proof. The unconditional refusal stays in place until a reliable readiness check is verified. See the [development proposal](proposals/automatic-account-switch.md).
+
+The candidate's launch-record code can check the installed bundle at `/Applications/Claude.app`: the version in `Contents/Info.plist`, its vendor code signature and the SHA-256 hash of `Contents/Resources/app.asar`. It also records a newly launched process's ID, launch time and managed data directory after explicitly disabling Claude's special background-launch mode. This record is stored at `automatic-switch/safe-launch.json` in CSW's own folder, using mode 0600 in a mode-0700 directory, with `.proof-*` temporary files. It contains no credentials and is insufficient to authorize quitting.
+
+The dormant native adapter uses `NSRunningApplication` for a single normal quit request and limits its Accessibility traversal to the target Claude's native modal controls, with only the exact known **"Wait for Claude"** action allowed. It does not scan the main conversation WebView, other apps, authentication settings, browser storage or process environment variables. It contains no force-quit or termination-signal path. These boundaries describe implemented code that is blocked from quit execution, not proof that automatic quitting is safe to enable.
+
+macOS grants Accessibility permission to the app as a whole; it does not enforce a per-dialog scope. The narrower traversal above is a code restriction. The explicit permission control can request the OS prompt, but the permission cannot bypass the readiness gate. No new credential reads, network requests or CLI sign-ins are added.
+
 ## About duplicating an environment
 
 Duplicate, in the environment's detail screen, copies the contents of the selected environment's folder, as they are, into a new environment folder on your Mac. The only things it leaves out are the always-isolated items (the account sign-in info in config.json, the connector and app settings, the device ID and the session state), the plugins, whose install records point at the original environment's location, and state.toml, where CSW records launch times. Symbolic links are not copied as they are, and shared items are linked again to the existing Claude. Even then, all CSW does is copy the files verbatim; it never interprets their contents and never sends them anywhere. The existing Claude cannot be duplicated.
@@ -95,7 +108,7 @@ The Claude Desktop App also keeps its sign-in state in cookies inside the enviro
 
 ## OS commands CSW runs
 
-CSW runs only the following four standard macOS commands. All of them are local operations and none of them communicate.
+CSW runs only the following standard macOS commands. All of them are local operations and none of them communicate.
 
 | Command | Purpose |
 |---|---|
@@ -103,6 +116,8 @@ CSW runs only the following four standard macOS commands. All of them are local 
 | `pgrep` | Checks whether the Claude Desktop App is running |
 | `ps` | Reads the launch arguments of running Claude processes to learn which environment's data folder they use |
 | `hdiutil` | Detects a CSW installer disk image that is still mounted and ejects it |
+| `codesign` | The unshipped candidate verifies the installed Claude app's vendor signature for its launch record; this does not authorize quitting |
+| `PlistBuddy` | The unshipped candidate reads only the installed Claude app's version from its `Info.plist` for the launch-record check |
 
 ## What CSW never touches
 
@@ -165,4 +180,4 @@ Every release from v0.19.0 onward ships with a CycloneDX-format list of all libr
 
 ## About this document
 
-CSW is open source and its entire source code is public. If anything in this document disagrees with the implementation, that is a bug: please tell us on [GitHub Issues](https://github.com/matsumotory/claude-desktop-switcher/issues).
+CSW is open source and its entire source code is public. If anything in this document disagrees with the implementation, that is a bug: please tell us on [GitHub Issues](https://github.com/seichris/claude-desktop-switcher/issues).

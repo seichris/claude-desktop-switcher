@@ -149,7 +149,7 @@ const EN = {
   '自己責任でのご利用': 'Use at your own risk',
   'ご利用は自己責任でお願いします。データの損失や不具合などについて、作者は責任を負いません。大切なデータは、お試しになる前にバックアップしておくことをおすすめします。': 'Use at your own risk. The author is not responsible for data loss or malfunctions. Back up important data before trying it.',
   'プライバシー': 'Privacy',
-  'CSWはインターネット通信も、利用状況の送信も行いません。パスワードを保管するmacOSのキーチェーンにも触れず、すべて手元のフォルダと設定の操作だけで動きます。': 'CSW makes no network requests and sends no usage data. It never touches the macOS Keychain that stores your passwords; it works only with local folders and settings.',
+  'CSWはインターネット通信も、利用状況の送信も行いません。macOSのキーチェーンには触れません。自動終了の試作は、安全性を確認できるまで無効です。': 'CSW makes no network requests and sends no usage data. It never touches the macOS Keychain. The automatic quit prototype is disabled until its safety can be verified.',
   '何を読み書きするか': 'What it reads and writes',
   '通常はCSW専用のフォルダに書き込みます。ローカルCode全体の共有を明示的に有効にすると、既存のClaudeを含む参加環境のCodeストアも置き換えます。サインイン情報は対象外です。読み書きの範囲と通信しないことの確かめ方は、プライバシーと透明性の文書で公開しています。':
     'Writes normally stay in CSW\'s own folder. Explicitly enabling complete local Code sharing also replaces Code stores in participating environments, including Existing Claude. Sign-in storage is excluded. Privacy and Transparency documents the read/write scope and how to verify the absence of network requests.',
@@ -229,7 +229,7 @@ const EN = {
 // must never be run through the dictionary: a user could name an environment
 // "仕事" and it must not become "Work". The default row's "既存の Claude" is
 // translated at construction with T() instead, so these can be skipped wholesale.
-const I18N_SKIP = '.profile-name, .detail-name, .profile-note, .detail-note, .usage-profile-name, .path-code, .code-line, code';
+const I18N_SKIP = '.profile-name, .detail-name, .profile-note, .detail-note, .usage-profile-name, #automaticText, .path-code, .code-line, code';
 const setEN = (v) => (Object.prototype.hasOwnProperty.call(EN, v) ? EN[v] : null);
 
 function applyI18nText(node) {
@@ -440,6 +440,11 @@ function withTransition(update) {
 
 // --- DOM refs ---------------------------------------------------------------
 const el = {
+  automaticBanner: $('automaticBanner'),
+  automaticText: $('automaticText'),
+  btnAutomaticPermission: $('btnAutomaticPermission'),
+  btnAutomaticRetry: $('btnAutomaticRetry'),
+  btnAutomaticClose: $('btnAutomaticClose'),
   profileList: $('profileList'),
   dmgBanner: $('dmgBanner'),
   btnDmgEject: $('btnDmgEject'),
@@ -1272,6 +1277,7 @@ function renderDetailFooter(name, isDefault, isInUse, supportsConcurrent) {
   // in the body above spells out the meaning of each short label.
   const switchBtn = h('button', {
     type: 'button', class: 'btn btn-primary',
+    disabled: automaticPending() && !isInUse,
     onclick: () => isInUse ? doBringToFront(name) : doSwitch(name, supportsConcurrent),
   }, h('span', { text: isInUse ? '前面に表示' : (isDefault ? '既存のClaudeを起動' : 'この環境を起動') }));
 
@@ -1288,11 +1294,12 @@ function renderDetailFooter(name, isDefault, isInUse, supportsConcurrent) {
   if (supportsConcurrent) {
     launchGroup.appendChild(h('button', {
       type: 'button', class: 'btn btn-ghost', onclick: () => doLaunchNewWindow(name),
+      disabled: automaticPending(),
     }, h('span', { text: '重複して起動' })));
   }
   el.detailFooter.replaceChildren(
     launchGroup,
-    h('button', { type: 'button', class: 'btn btn-danger', onclick: () => showDeleteRow(name) },
+    h('button', { type: 'button', class: 'btn btn-danger', disabled: automaticPending(), onclick: () => showDeleteRow(name) },
       icon('i-trash'), h('span', { text: '削除' })));
 }
 
@@ -1356,41 +1363,72 @@ function showCloneRow(name) {
 }
 
 // --- Backend operations -----------------------------------------------------
-// Switching relinks shared/isolated config and launches that environment's
-// Claude. The core refuses to switch while Claude Desktop is running (to avoid
-// config write-back races), so only one environment's Claude runs at a time.
-// Guide the user to quit the running one first instead of showing a dead end.
-function showSwitchBlocked(name, supportsConcurrent) {
-  el.detailFooter.className = 'view-footer split';
-  // Fully-isolated environments never need the running Claude quit: point straight
-  // at opening a new window instead of a dead "quit first" instruction.
-  if (supportsConcurrent) {
-    el.detailFooter.replaceChildren(
-      h('span', { class: 'confirm-text', text: 'この環境は、起動中のClaudeを終了せずに開けます。' }),
-      h('div', { class: 'footer-group' },
-        h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => showDetail(name) }, '閉じる'),
-        h('button', { type: 'button', class: 'btn btn-primary', onclick: () => doLaunchNewWindow(name) },
-          h('span', { text: '重複して起動' }))));
-    return;
+// The coordinator requests normal quit, waits for the original process to
+// exit, then uses the strict stopped-only sync and launch path.
+async function doSwitch(name) {
+  try {
+    const status = await invoke('switch_profile', { name, noLaunch: false });
+    applyAutomaticStatus(status);
+    await refreshAutomaticStatus();
+  } catch (err) {
+    showToast(T('起動の予約が残っているか、環境を利用できません。状態を確認してください。',
+      'A launch is already pending, or the environment is unavailable. Check its status.'), true);
+    await refreshAutomaticStatus();
   }
-  el.detailFooter.replaceChildren(
-    h('span', { class: 'confirm-text', text: '起動中のClaudeを終了してから、もう一度押してください。設定の衝突を防ぐため、共有を含む環境のClaudeは同時に開けません。' }),
-    h('div', { class: 'footer-group' },
-      h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => showDetail(name) }, '閉じる'),
-      h('button', { type: 'button', class: 'btn btn-primary', onclick: () => doSwitch(name, false) }, 'もう一度試す')));
 }
 
-async function doSwitch(name, supportsConcurrent) {
-  try {
-    if (await invoke('get_desktop_running_status')) { showSwitchBlocked(name, supportsConcurrent); return; }
-    await invoke('switch_profile', { name, noLaunch: false });
-    await refreshProfiles();
-    withTransition(() => showDetail(name));
-    showToast(name === 'default' ? T('既存のClaudeを起動しました', 'Launched Existing Claude') : T(`「${name}」のClaudeを起動しました`, `Launched Claude for "${name}"`));
-  } catch (err) {
-    if (String(err || '').includes('Claude Desktop is running')) { showSwitchBlocked(name, supportsConcurrent); return; }
-    showToast('起動できませんでした。もう一度お試しください。', true);
+// The Rust coordinator owns all decisions. This view only presents its status;
+// it never reads Claude UI or infers whether work has finished.
+let automaticStatus = { sequence: 0, phase: 'idle', target: null, error: null };
+let automaticDismissed = -1;
+let automaticReadPending = false;
+function automaticPending() {
+  return ['checking', 'waiting', 'switching'].includes(automaticStatus.phase);
+}
+function automaticError(code) {
+  const copy = {
+    automatic_guard_unverified: T('Claudeの作業を保護する終了処理の準備完了を確認できないため、自動終了は無効です。作業完了後に手動で終了してから起動してください。', 'Automatic quitting is disabled because Claude provides no verified signal that its task protection is ready. Quit manually after its work finishes, then launch.'),
+    automatic_accessibility_required: T('自動起動にはAccessibilityの許可が必要です。macOSのシステム設定で許可してから、もう一度試してください。', 'Automatic launch needs Accessibility permission. Allow it in macOS System Settings, then try again.'),
+    automatic_unmanaged_launch: T('このClaudeは自動終了を確認できる起動経路ではありません。作業完了後に手動で終了し、CSWから起動してください。', 'This Claude was not launched with a verified quit guard. After its work finishes, quit it manually and launch it from CSW.'),
+    automatic_unsupported_build: T('このClaudeのバージョンは自動終了の検証対象外です。作業完了後に手動で終了してください。', 'This Claude build has not been reviewed for automatic quitting. Quit it manually after its work finishes.'),
+    automatic_multiple_instances: T('Claudeが複数起動しているか、状態を確認できません。作業完了後に手動で終了してください。', 'Multiple Claude instances are running, or their state is unclear. Quit them manually after their work finishes.'),
+    automatic_startup: T('Claudeの起動完了を待ってから、もう一度試してください。', 'Wait for Claude to finish starting, then try again.'),
+    automatic_unknown_dialog: T('Claudeに未対応のダイアログがあります。Claudeを確認してください。自動終了は続けません。', 'Claude has an unfamiliar dialog. Check Claude directly. Automatic quitting has stopped.'),
+  };
+  return copy[code] || T('安全に起動を続けられませんでした。Claudeの作業と画面を確認し、作業完了後に手動で終了してください。',
+    'Could not safely continue launching. Check Claude and its work, then quit it manually after the work finishes.');
+}
+function applyAutomaticStatus(status) {
+  if (!status || JSON.stringify(status) === JSON.stringify(automaticStatus)) return;
+  const wasPending = automaticPending();
+  automaticStatus = status;
+  const pending = automaticPending();
+  const failed = status.phase === 'failed';
+  el.automaticBanner.hidden = (!pending && !failed) || automaticDismissed === status.sequence;
+  const target = status.target === 'default' ? T('既存のClaude', 'Existing Claude') : String(status.target || '');
+  if (failed) el.automaticText.textContent = automaticError(status.error);
+  else if (status.phase === 'waiting') el.automaticText.textContent = T(
+    `Claudeの終了を待っています。作業中や入力待ちの間は待ち続けます。終了後に「${target}」を起動するため、CSWは終了しないでください。`,
+    `Waiting for Claude to exit, including while work or input is pending. Keep CSW running to launch "${target}" after Claude exits.`);
+  else if (status.phase === 'switching') el.automaticText.textContent = T(`「${target}」の起動を準備しています。`, `Preparing to launch "${target}".`);
+  else el.automaticText.textContent = T(`「${target}」を起動する前に、Claudeの状態を確認しています。`, `Checking Claude before launching "${target}".`);
+  el.btnAutomaticPermission.parentElement.hidden = !failed;
+  el.btnAutomaticPermission.hidden = !failed || status.error !== 'automatic_accessibility_required';
+  el.btnAutomaticRetry.hidden = !failed;
+  el.btnAutomaticClose.hidden = !failed;
+  if (!el.viewDetail.hidden && selectedName && wasPending !== pending) showDetail(selectedName);
+  if (status.phase === 'completed') {
+    showToast(T(`「${target}」を開きました`, `Opened "${target}"`));
+    revalidateRunning();
   }
+  requestAnimationFrame(refreshFades);
+}
+async function refreshAutomaticStatus() {
+  if (automaticReadPending) return;
+  automaticReadPending = true;
+  try { applyAutomaticStatus(await invoke('get_automatic_switch_status')); }
+  catch (_) { /* A failed read cannot authorize an action. Backend remains owner. */ }
+  finally { automaticReadPending = false; }
 }
 
 // Open a fully-isolated environment in an additional window, alongside whatever is
@@ -1937,7 +1975,7 @@ function initAccent() {
 const DISCLAIMER = [
   ['無保証', '本ソフトウェアはMITライセンスのもとで、そのままの状態で提供されます。動作や品質について、いかなる保証もありません。'],
   ['自己責任でのご利用', 'ご利用は自己責任でお願いします。データの損失や不具合などについて、作者は責任を負いません。大切なデータは、お試しになる前にバックアップしておくことをおすすめします。'],
-  ['プライバシー', 'CSWはインターネット通信も、利用状況の送信も行いません。パスワードを保管するmacOSのキーチェーンにも触れず、すべて手元のフォルダと設定の操作だけで動きます。'],
+  ['プライバシー', 'CSWはインターネット通信も、利用状況の送信も行いません。macOSのキーチェーンには触れません。自動終了の試作は、安全性を確認できるまで無効です。'],
   ['何を読み書きするか', '通常はCSW専用のフォルダに書き込みます。ローカルCode全体の共有を明示的に有効にすると、既存のClaudeを含む参加環境のCodeストアも置き換えます。サインイン情報は対象外です。読み書きの範囲と通信しないことの確かめ方は、プライバシーと透明性の文書で公開しています。'],
   ['非公式プロジェクト', '本プロジェクトは非公式のコミュニティ製で、Anthropic社とは関係ありません。「Claude」はAnthropicの商標です。'],
 ];
@@ -2043,6 +2081,17 @@ async function init() {
   await refreshProfiles();
   checkFirstRun();
   showEmpty();
+  el.btnAutomaticPermission.addEventListener('click', async () => {
+    try {
+      const allowed = await invoke('request_accessibility_permission');
+      showToast(allowed ? T('許可を確認しました。もう一度試してください。', 'Permission confirmed. Try again.')
+        : T('macOSのシステム設定でAccessibilityを許可してから、もう一度試してください。', 'Allow Accessibility in macOS System Settings, then try again.'));
+    } catch (_) { showToast(T('許可を確認できませんでした。', 'Could not check permission.'), true); }
+  });
+  el.btnAutomaticRetry.addEventListener('click', () => { if (automaticStatus.target) doSwitch(automaticStatus.target, false); });
+  el.btnAutomaticClose.addEventListener('click', () => { automaticDismissed = automaticStatus.sequence; el.automaticBanner.hidden = true; });
+  await refreshAutomaticStatus();
+  setInterval(refreshAutomaticStatus, 1000);
 }
 
 document.addEventListener('DOMContentLoaded', init);
@@ -2094,6 +2143,10 @@ function devInvoke(cmd, args) {
     if (sample[name]) sample[name].note = note;
   }
   switch (cmd) {
+    case 'get_automatic_switch_status':
+      return Promise.resolve({ sequence: 0, phase: 'idle', target: null, error: null });
+    case 'request_accessibility_permission':
+      return Promise.resolve(false);
     case 'get_usage_reports': {
       const now = Date.now();
       const window = (key, used_percent, resets_at_ms, state = 'available') => ({ key, used_percent, resets_at_ms, state });

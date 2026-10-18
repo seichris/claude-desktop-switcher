@@ -77,6 +77,30 @@ async function main() {
   }
   const clickEnv = (name) => evalv(`(async()=>{const li=[...document.querySelectorAll('.profile-item')].find(e=>e.querySelector('.profile-name')?.textContent===${JSON.stringify(name)});li&&li.click();await new Promise(r=>setTimeout(r,500));return 'ok';})()`);
 
+  async function checkAutomatic() {
+    // Presentation contract: a pending task never exposes a cancel/force action;
+    // fixed errors and long user names must fit both supported window widths.
+    await evalv('automaticReadPending = true');
+    for (const width of [600, 720]) {
+      await cmd('Emulation.setDeviceMetricsOverride', { width, height: 520, deviceScaleFactor: 2, mobile: false });
+      for (const phase of ['checking', 'waiting', 'switching', 'failed']) {
+        const result = (await evalv(`(async()=>{
+          applyAutomaticStatus({sequence:${width}, phase:${JSON.stringify(phase)}, target:'A'.repeat(64), error:'automatic_accessibility_required'});
+          await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+          const banner=document.getElementById('automaticBanner');
+          const visible=[...banner.querySelectorAll('button')].filter(b=>getComputedStyle(b).display!=='none');
+          return {page:document.documentElement.scrollWidth, width:innerWidth,
+            visible:visible.length, overflow:[banner,...visible].some(e=>e.scrollWidth>e.clientWidth+1),
+            shown:getComputedStyle(banner).display!=='none'};
+        })()`)).result?.value;
+        if (!result || !result.shown || result.page !== width || result.overflow || result.visible !== (phase === 'failed' ? 3 : 0)) {
+          throw new Error(`automatic launch layout failed (${phase}): ${JSON.stringify(result)}`);
+        }
+      }
+    }
+    await evalv("applyAutomaticStatus({sequence:0,phase:'idle',target:null,error:null}); automaticReadPending=false");
+  }
+
   async function checkUsage() {
     // Both locales must remain readable at the app's supported minimum width.
     for (const width of [600, 720]) {
@@ -115,6 +139,7 @@ async function main() {
 
   const done = [];
   for (const { lang, prefix, env, summary } of LOCALES) {
+    await load(lang); await checkAutomatic();
     // onboarding: fresh first-run empty view
     await load(lang); await evalv(`localStorage.removeItem('csw_onboarded'); checkFirstRun(); showEmpty();`); await sleep(400);
     await fit('emptyScroll', `${prefix}screen_onboarding.png`);
@@ -122,6 +147,9 @@ async function main() {
     await load(lang); await clickEnv(env);
     await evalv(`(()=>{const s=[...document.querySelectorAll('.sharing-summary')].find(b=>${summary}.test(b.textContent));if(s&&!s.closest('.disclosure').classList.contains('open'))s.click();})()`); await sleep(400);
     await fit('detailScroll', `${prefix}screen_overview.png`);
+    // The quarantined prototype must show its manual-quit fallback honestly.
+    await evalv(`automaticReadPending=true; applyAutomaticStatus({sequence:1,phase:'failed',target:${JSON.stringify(env)},error:'automatic_guard_unverified'});`);
+    await fit('detailScroll', `${prefix}screen_automatic_blocked.png`);
     // create: the new-environment sheet
     await load(lang); await evalv(`showCreate();`); await sleep(400);
     await fit('createScroll', `${prefix}screen_create.png`);

@@ -1,3 +1,5 @@
+pub mod automatic;
+mod automatic_flow;
 pub mod desktop;
 pub mod shell;
 pub mod takeover;
