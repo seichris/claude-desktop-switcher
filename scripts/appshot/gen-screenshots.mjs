@@ -231,6 +231,10 @@ async function main() {
     // quitting, credentials, OS Accessibility or task state is used by this QA.
     await load(lang); await clickEnv(env);
     await checkPendingLaunch(env);
+    // Capture a fresh waiting request, without transient toasts or the mock
+    // process state deliberately exercised by the preceding flow checks.
+    await load(lang); await clickEnv(env);
+    await evalv(`doSwitch(${JSON.stringify(env)})`);
     await crop(`${prefix}screen_pending_launch.png`, 760, 600);
     // hero: the sample env, disclosures collapsed, 760x498 crop
     await load(lang); await clickEnv(env); await sleep(300);
