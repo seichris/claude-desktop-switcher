@@ -98,6 +98,8 @@ The candidate's launch-record code can check the installed bundle at `/Applicati
 
 The dormant native adapter uses `NSRunningApplication` for a single normal quit request and limits its Accessibility traversal to the target Claude's native modal controls, with only the exact known **"Wait for Claude"** action allowed. It does not scan the main conversation WebView, other apps, authentication settings, browser storage or process environment variables. It contains no force-quit or termination-signal path. These boundaries describe implemented code that is blocked from quit execution, not proof that automatic quitting is safe to enable.
 
+To find native sheets, it checks only the role and process ID of each immediate window child. It reads no text or descendants of other children. Window counts, element counts, depth and per-operation waiting time are bounded.
+
 macOS grants Accessibility permission to the app as a whole; it does not enforce a per-dialog scope. The narrower traversal above is a code restriction. The explicit permission control can request the OS prompt, but the permission cannot bypass the readiness gate. No new credential reads, network requests or CLI sign-ins are added.
 
 ## About duplicating an environment

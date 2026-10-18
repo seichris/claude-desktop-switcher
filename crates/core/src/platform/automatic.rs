@@ -716,12 +716,22 @@ fn native_modals(pid: u32) -> Result<Vec<Ax>> {
             modals.push(window);
             continue;
         }
-        for sheet in window.elements("AXSheets", 4)? {
-            sheet.check_pid(pid)?;
-            if sheet.string("AXRole")?.as_deref() != Some("AXSheet") {
-                return Err(refuse("automatic_unknown_dialog"));
+        // AppKit publishes sheets in AXChildren; AXSheets is not a public AX
+        // attribute. Inspect only each immediate child's PID/role. Never read
+        // ordinary child text or descend into the conversation WebView.
+        let mut sheets = 0;
+        for child in window.elements("AXChildren", 16)? {
+            child.check_pid(pid)?;
+            let role = child
+                .string("AXRole")?
+                .ok_or_else(|| refuse("automatic_unknown_dialog"))?;
+            if role == "AXSheet" {
+                sheets += 1;
+                if sheets > 4 {
+                    return Err(refuse("automatic_unknown_dialog"));
+                }
+                modals.push(child);
             }
-            modals.push(sheet);
         }
     }
     Ok(modals)
@@ -790,6 +800,9 @@ unsafe extern "C" {
         action: core_foundation::string::CFStringRef,
     ) -> i32;
 }
+
+#[cfg(test)]
+mod native_tests;
 
 #[cfg(test)]
 mod tests {
