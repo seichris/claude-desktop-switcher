@@ -17,6 +17,8 @@ use crate::{
 };
 
 const CONFIG: &str = "native-code.toml";
+const JOURNAL: &str = "native-code-journal.json";
+const LAUNCH: &str = "native-code-launch-pending";
 const CATALOG: &str = "claude-code-sessions";
 const WORKTREES: &str = "git-worktrees.json";
 const PRESETS: &str = "ccd-session-presets.json";
@@ -27,10 +29,12 @@ fn refused(message: &str) -> CswError {
     CswError::Other(format!("Local Code sharing: {message}"))
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Group {
     version: u32,
+    #[serde(default)]
+    generation: String,
     source: String,
     members: Vec<String>,
     fingerprints: BTreeMap<String, String>,
@@ -41,6 +45,18 @@ struct Location {
     desktop: PathBuf,
     bucket: PathBuf,
     account: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Journal {
+    version: u32,
+    tag: String,
+    authority: String,
+    group: Group,
+    places: Vec<(String, PathBuf, PathBuf)>,
+    prior_config: Option<String>,
+    planned_config: String,
 }
 
 #[derive(Clone, Default)]
@@ -55,6 +71,53 @@ fn stopped(provider: &dyn PlatformProvider) -> Result<()> {
         return Err(CswError::DesktopRunning);
     }
     Ok(())
+}
+
+fn no_pending_launch(provider: &dyn PlatformProvider) -> Result<()> {
+    match fs::symlink_metadata(provider.app_data_dir().join(LAUNCH)) {
+        Ok(_) => Err(refused(
+            "a previous launch was not observed; quit Claude and use csw unshare-code before configuring sharing again",
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Serialize CSW launches against sharing, including asynchronous app startup.
+/// The durable reservation fails closed if this process exits during startup.
+pub fn launch_guard(provider: &dyn PlatformProvider, name: &str) -> Result<Option<File>> {
+    if load(provider)?.is_none() && !provider.app_data_dir().join(JOURNAL).try_exists()? {
+        return Ok(None);
+    }
+    let guard = lock(provider)?;
+    no_pending_launch(provider)?;
+    if is_shared(provider, name)? {
+        stopped(provider)?;
+    }
+    write_private(
+        &provider.app_data_dir().join(LAUNCH),
+        b"startup not yet observed\n",
+    )?;
+    Ok(Some(guard))
+}
+
+/// Called while the launch guard is held. Never clear a reservation merely
+/// because a startup timeout elapsed: the asynchronous launch could still run.
+pub fn finish_launch(provider: &dyn PlatformProvider, launched: bool) -> Result<()> {
+    if launched {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !provider.is_claude_desktop_running()? && provider.running_desktop_args()?.is_empty()
+        {
+            if std::time::Instant::now() >= deadline {
+                return Err(refused(
+                    "Claude startup was not observed; sharing remains blocked until csw unshare-code",
+                ));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+    fs::remove_file(provider.app_data_dir().join(LAUNCH))?;
+    sync_directory(&provider.app_data_dir())
 }
 
 fn lock(provider: &dyn PlatformProvider) -> Result<File> {
@@ -90,6 +153,13 @@ fn directories(path: &Path) -> Result<Vec<PathBuf>> {
     let mut result = Vec::new();
     for entry in fs::read_dir(path)? {
         let entry = entry?;
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|n| n.starts_with(".csw-stage-") || n.starts_with(".csw-previous-"))
+        {
+            continue;
+        }
         if !entry.file_type()?.is_dir() || !entry.file_name().to_str().is_some_and(uuid) {
             return Err(refused(
                 "the account/workspace directory layout is unsupported",
@@ -301,10 +371,12 @@ impl Store {
         {
             let mut value: serde_json::Value =
                 serde_json::from_slice(bytes).map_err(|_| refused("invalid Code presets"))?;
-            if let Some(accounts) = value.get_mut("byAccount").and_then(|v| v.as_object_mut())
-                && let Some(presets) = accounts.get(from).cloned()
-            {
-                accounts.insert(to.into(), presets);
+            if let Some(accounts) = value.get_mut("byAccount").and_then(|v| v.as_object_mut()) {
+                if let Some(presets) = accounts.get(from).cloned() {
+                    accounts.insert(to.into(), presets);
+                } else {
+                    accounts.remove(to);
+                }
             }
             store.presets = Some(serde_json::to_vec(&value)?);
         }
@@ -335,14 +407,28 @@ impl Store {
         for (relative, data) in &self.files {
             write_private(&stage.join(relative), data)?;
         }
+        sync_directories(&stage)?;
         safe_fs::reject_symlink(&location.bucket)?;
-        fs::rename(&location.bucket, &old)?;
+        let had_bucket = location.bucket.try_exists()?;
+        if had_bucket {
+            fs::rename(&location.bucket, &old)?;
+        }
         if let Err(error) = fs::rename(&stage, &location.bucket) {
-            let _ = fs::rename(&old, &location.bucket);
+            if had_bucket {
+                let _ = fs::rename(&old, &location.bucket);
+            }
             return Err(error.into());
         }
         // Every original store has already been copied to the durable backup.
-        fs::remove_dir_all(old)?;
+        if had_bucket {
+            fs::remove_dir_all(old)?;
+        }
+        sync_directory(
+            location
+                .bucket
+                .parent()
+                .ok_or_else(|| refused("invalid bucket path"))?,
+        )?;
         for (name, bytes) in [(WORKTREES, &self.worktrees), (PRESETS, &self.presets)] {
             let path = location.desktop.join(name);
             safe_fs::reject_symlink(&path)?;
@@ -354,6 +440,7 @@ impl Store {
                 fs::remove_file(path)?;
             }
         }
+        sync_directory(&location.desktop)?;
         Ok(())
     }
 }
@@ -373,13 +460,215 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = options.open(path)?;
     file.write_all(bytes)?;
     file.sync_all()?;
+    sync_directory(parent)?;
     Ok(())
+}
+
+fn sync_directory(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    File::open(path)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
+fn sync_directories(path: &Path) -> Result<()> {
+    safe_fs::reject_symlink(path)?;
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            sync_directories(&entry.path())?;
+        }
+    }
+    sync_directory(path)
+}
+
+fn nonce() -> Result<String> {
+    Ok(format!(
+        "{}-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| refused("clock unavailable"))?
+            .as_nanos(),
+        std::process::id()
+    ))
+}
+
+fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
+    let temp = path.with_file_name(format!(".csw-write-{}", nonce()?));
+    write_private(&temp, data)?;
+    fs::rename(&temp, path)?;
+    sync_directory(
+        path.parent()
+            .ok_or_else(|| refused("invalid private file path"))?,
+    )
+}
+
+fn journal_locations(manager: &ProfileManager, journal: &Journal) -> Result<Vec<Location>> {
+    let names: Vec<_> = std::iter::once(&journal.group.source)
+        .chain(&journal.group.members)
+        .collect();
+    if journal.version != 1
+        || journal.group.version != 1
+        || journal.group.generation != journal.tag
+        || journal.tag.is_empty()
+        || journal.tag.len() > 100
+        || !journal.tag.bytes().all(|b| b.is_ascii_digit() || b == b'-')
+        || names.len() != journal.places.len()
+        || names.len() > 65
+    {
+        return Err(refused("invalid recovery journal"));
+    }
+    let mut result = Vec::new();
+    for (expected, (name, desktop, bucket)) in names.iter().zip(&journal.places) {
+        if expected.as_str() != name {
+            return Err(refused("recovery participants do not match"));
+        }
+        let profile = manager.get_profile(name)?;
+        if profile.isolation.desktop_user_data_dir != *desktop {
+            return Err(refused("recovery environment moved"));
+        }
+        safe_fs::reject_symlink(desktop)?;
+        let catalog = desktop.join(CATALOG);
+        let relative = bucket
+            .strip_prefix(&catalog)
+            .map_err(|_| refused("recovery bucket escapes its environment"))?;
+        let parts: Vec<_> = relative.components().collect();
+        if parts.len() != 2
+            || parts
+                .iter()
+                .any(|p| !p.as_os_str().to_str().is_some_and(uuid))
+        {
+            return Err(refused("invalid recovery account/workspace path"));
+        }
+        let mut checked = desktop.clone();
+        for part in [
+            CATALOG,
+            parts[0]
+                .as_os_str()
+                .to_str()
+                .ok_or_else(|| refused("invalid recovery account"))?,
+            parts[1]
+                .as_os_str()
+                .to_str()
+                .ok_or_else(|| refused("invalid recovery workspace"))?,
+        ] {
+            checked.push(part);
+            safe_fs::reject_symlink(&checked)?;
+        }
+        result.push(Location {
+            name: name.clone(),
+            desktop: desktop.clone(),
+            bucket: bucket.clone(),
+            account: parts[0]
+                .as_os_str()
+                .to_str()
+                .ok_or_else(|| refused("invalid recovery account"))?
+                .into(),
+        });
+    }
+    Ok(result)
+}
+
+fn recover(manager: &ProfileManager, provider: &dyn PlatformProvider) -> Result<()> {
+    let root = provider.app_data_dir();
+    let path = root.join(JOURNAL);
+    if fs::symlink_metadata(&path).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
+        return Ok(());
+    }
+    stopped(provider)?;
+    no_pending_launch(provider)?;
+    let journal: Journal = serde_json::from_slice(&read_regular(&path, &mut 256_000)?)
+        .map_err(|_| refused("invalid recovery journal"))?;
+    let places = journal_locations(manager, &journal)?;
+    let config = root.join(CONFIG);
+    let current = match fs::symlink_metadata(&config) {
+        Ok(_) => Some(
+            String::from_utf8(read_regular(&config, &mut 65536)?)
+                .map_err(|_| refused("invalid recovery configuration"))?,
+        ),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    if current.as_deref() != Some(journal.planned_config.as_str()) {
+        if current != journal.prior_config {
+            return Err(refused(
+                "sharing configuration changed during an interrupted transaction",
+            ));
+        }
+        let backup_root = root.join("native-code-backups");
+        safe_fs::reject_symlink(&backup_root)?;
+        let backup = backup_root.join(&journal.tag);
+        safe_fs::reject_symlink(&backup)?;
+        let originals: Vec<_> = places
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                safe_fs::reject_symlink(&backup.join(i.to_string()))?;
+                Store::read(&Location {
+                    name: p.name.clone(),
+                    desktop: backup.join(i.to_string()),
+                    bucket: backup.join(i.to_string()).join("bucket"),
+                    account: p.account.clone(),
+                })
+            })
+            .collect::<Result<_>>()?;
+        let authority = places
+            .iter()
+            .position(|p| p.name == journal.authority)
+            .ok_or_else(|| refused("invalid recovery authority"))?;
+        let incoming: Vec<_> = places
+            .iter()
+            .map(|p| originals[authority].for_account(&places[authority].account, &p.account))
+            .collect::<Result<_>>()?;
+        for (place, store) in places.iter().zip(&incoming) {
+            if journal.group.fingerprints.get(&place.name) != Some(&store.fingerprint()) {
+                return Err(refused(
+                    "recovery snapshot does not match planned transaction",
+                ));
+            }
+        }
+        if toml::to_string(&journal.group)? != journal.planned_config {
+            return Err(refused(
+                "recovery configuration does not match planned transaction",
+            ));
+        }
+        let tag = nonce()?;
+        for (store, place) in incoming.iter().zip(&places) {
+            store.apply(place, &tag)?;
+        }
+        atomic_write(&config, journal.planned_config.as_bytes())?;
+    }
+    // Completed transactions keep their new stores; incomplete ones have now
+    // completed the intended copy. Remove only this journal's own staging names.
+    for place in &places {
+        for prefix in [".csw-stage-", ".csw-previous-"] {
+            let leftover = place
+                .bucket
+                .with_file_name(format!("{prefix}{}", journal.tag));
+            safe_fs::reject_symlink(&leftover)?;
+            if leftover.exists() {
+                fs::remove_dir_all(leftover)?;
+            }
+        }
+        for name in [WORKTREES, PRESETS] {
+            let leftover = place.desktop.join(format!(".{name}-{}", journal.tag));
+            safe_fs::reject_symlink(&leftover)?;
+            if leftover.exists() {
+                fs::remove_file(leftover)?;
+            }
+        }
+    }
+    fs::remove_file(path)?;
+    sync_directory(&root)
 }
 
 fn load(provider: &dyn PlatformProvider) -> Result<Option<Group>> {
     let path = provider.app_data_dir().join(CONFIG);
-    if !path.try_exists()? {
-        return Ok(None);
+    match fs::symlink_metadata(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+        Ok(_) => (),
     }
     let bytes = read_regular(&path, &mut 65536)?;
     let group = toml::from_str(
@@ -396,6 +685,7 @@ fn synchronize(
     seed: Option<&str>,
 ) -> Result<PathBuf> {
     stopped(provider)?;
+    no_pending_launch(provider)?;
     let places = locations(manager, group)?;
     let originals: Vec<_> = places.iter().map(Store::read).collect::<Result<_>>()?;
     let changed: Vec<_> = places
@@ -424,14 +714,7 @@ fn synchronize(
     if seed.is_none() && changed.is_empty() {
         return Ok(provider.app_data_dir().join("native-code-backups"));
     }
-    let tag = format!(
-        "{}-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|_| refused("clock unavailable"))?
-            .as_nanos(),
-        std::process::id()
-    );
+    let tag = nonce()?;
     let backup_root = provider.app_data_dir().join("native-code-backups");
     safe_fs::private_dir(&backup_root)?;
     let backup = backup_root.join(&tag);
@@ -448,9 +731,22 @@ fn synchronize(
                 .collect::<Vec<_>>(),
         )?,
     )?;
-    if let Some(existing) = load(provider)? {
-        write_private(&backup.join(CONFIG), toml::to_string(&existing)?.as_bytes())?;
+    let prior_config = if load(provider)?.is_some() {
+        Some(
+            String::from_utf8(read_regular(
+                &provider.app_data_dir().join(CONFIG),
+                &mut 65536,
+            )?)
+            .map_err(|_| refused("invalid sharing configuration"))?,
+        )
+    } else {
+        None
+    };
+    if let Some(existing) = &prior_config {
+        write_private(&backup.join(CONFIG), existing.as_bytes())?;
     }
+    sync_directories(&backup)?;
+    sync_directory(&backup_root)?;
     let incoming: Vec<_> = places
         .iter()
         .map(|p| originals[index].for_account(&places[index].account, &p.account))
@@ -462,22 +758,39 @@ fn synchronize(
         .zip(&incoming)
         .map(|(p, s)| (p.name.clone(), s.fingerprint()))
         .collect();
-    write_private(&temp, toml::to_string(group)?.as_bytes())?;
+    group.generation = tag.clone();
+    let planned_config = toml::to_string(group)?;
+    write_private(&temp, planned_config.as_bytes())?;
     stopped(provider)?;
+    let journal = Journal {
+        version: 1,
+        tag: tag.clone(),
+        authority: authority.into(),
+        group: group.clone(),
+        places: places
+            .iter()
+            .map(|p| (p.name.clone(), p.desktop.clone(), p.bucket.clone()))
+            .collect(),
+        prior_config,
+        planned_config,
+    };
+    atomic_write(
+        &provider.app_data_dir().join(JOURNAL),
+        &serde_json::to_vec(&journal)?,
+    )?;
     let result = (|| -> Result<()> {
         for (store, place) in incoming.iter().zip(&places) {
             store.apply(place, &tag)?;
         }
         fs::rename(&temp, &config)?;
+        sync_directory(&provider.app_data_dir())?;
         Ok(())
     })();
     if result.is_err() {
-        let restore_tag = format!("restore-{tag}");
-        for (store, place) in originals.iter().zip(&places) {
-            store.apply(place, &restore_tag)?;
-        }
+        recover(manager, provider)?;
         return result.map(|_| backup);
     }
+    recover(manager, provider)?;
     Ok(backup)
 }
 
@@ -490,8 +803,10 @@ pub fn configure(
     members: &[String],
 ) -> Result<PathBuf> {
     let _guard = lock(provider)?;
+    recover(manager, provider)?;
     let mut group = Group {
         version: 1,
+        generation: String::new(),
         source: source.into(),
         members: members.into(),
         fingerprints: BTreeMap::new(),
@@ -505,11 +820,14 @@ pub fn before_switch(
     provider: &dyn PlatformProvider,
     target: &str,
 ) -> Result<()> {
-    if load(provider)?.is_none() {
+    if load(provider)?.is_none() && !provider.app_data_dir().join(JOURNAL).try_exists()? {
         return Ok(());
     }
     let _guard = lock(provider)?;
-    let mut group = load(provider)?.ok_or_else(|| refused("sharing configuration changed"))?;
+    recover(manager, provider)?;
+    let Some(mut group) = load(provider)? else {
+        return Ok(());
+    };
     if group.source == target || group.members.iter().any(|n| n == target) {
         synchronize(manager, provider, &mut group, None)?;
     }
@@ -517,5 +835,26 @@ pub fn before_switch(
 }
 
 pub fn is_shared(provider: &dyn PlatformProvider, name: &str) -> Result<bool> {
+    if fs::symlink_metadata(provider.app_data_dir().join(JOURNAL)).is_ok() {
+        return Err(refused(
+            "an interrupted transaction must be recovered by switching environments before launching or deleting one",
+        ));
+    }
     Ok(load(provider)?.is_some_and(|g| g.source == name || g.members.iter().any(|n| n == name)))
+}
+
+/// Stop future synchronization without changing any participant's data or login.
+pub fn disable(manager: &ProfileManager, provider: &dyn PlatformProvider) -> Result<()> {
+    let _guard = lock(provider)?;
+    stopped(provider)?;
+    match fs::remove_file(provider.app_data_dir().join(LAUNCH)) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+        Err(e) => return Err(e.into()),
+        Ok(()) => (),
+    }
+    recover(manager, provider)?;
+    if load(provider)?.is_some() {
+        fs::remove_file(provider.app_data_dir().join(CONFIG))?;
+    }
+    sync_directory(&provider.app_data_dir())
 }

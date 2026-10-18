@@ -43,13 +43,14 @@ How should you partition your environments on a single PC? You can flexibly adju
 - **Integrated Management for GUI & CLI**: Centrally manages the environments behind the Claude Desktop App and Claude Code (CLI). Switch GUI environments by selecting one; sync the CLI to the same isolated environment by running a command in a separate terminal.
 - **Customizable Isolation**: You can choose which settings to share and which data to separate based on your use case.
 - **Saved Claude usage in this fork**: Local builds show each discovered environment's saved usage percentages, available resets, and last-checked time. Stale and missing data are explicit. The reader uses only existing Desktop usage files and matching local cache responses, with no network requests or credential access. This addition is not part of the upstream downloads linked above; see [the local-cache guide](docs/USER_GUIDE_EN.md#checking-saved-claude-usage).
-- **Zero-Impact Isolation**: It does not arbitrarily overwrite your Mac's global system settings. Settings are applied locally only to the apps or specific terminal tabs launched by this tool. It makes absolutely no changes to your existing default Claude environment.
+- **Complete local Code sharing in this fork**: Explicitly synchronize the full local Desktop Code sidebar, worktree bookkeeping and saved presets between environments, keeping Desktop sign-ins separate. Synchronization runs before a participating launch with Claude stopped, after backups, without a CLI login. Disable it with `csw unshare-code`; current data and logins remain. This addition requires [the local app and CLI](docs/LOCAL_BUILD.md), rather than the upstream downloads. See the [sharing guide](docs/USER_GUIDE_EN.md#complete-local-code-sharing-in-this-fork).
+- **Zero-Impact Isolation**: It does not arbitrarily overwrite your Mac's global system settings. Settings are applied locally only to the apps or specific terminal tabs launched by this tool. Existing Claude is preserved by default. Explicitly enabling complete local Code sharing additionally replaces its Code stores, while leaving sign-in storage separate.
 
 ## Usage
 
 ### GUI Workflow
 
-Managing the desktop app requires no complex configuration. Everything is done in the settings window, with no terminal or scripts.
+Standard environment management is available in the settings window. This fork's optional complete local Code sharing uses the setup command documented separately above.
 
 1. **Install & Launch**: Place `Claude-Desktop-Switcher.app` in your Applications folder and launch it. The settings window opens.
 2. **Create Environments**: In the settings window, create independent environments such as "Work" or "Research" with a single click.
@@ -154,13 +155,14 @@ MIT
 - **GUIとCLIの統合環境管理**：ClaudeデスクトップアプリとClaude Code（CLI）の背後の環境を一元管理します。GUIの環境を選んで切り替えるほか、別に開いたターミナルでコマンドを実行すれば、CLIも同じ隔離環境へ同期できます。
 - **分離度のカスタマイズ**：共有したい設定と分けたいデータを用途に合わせて選択可能です。
 - **このフォークで保存済みのClaudeの利用量を表示**：ローカルビルドでは、見つかった各環境の使用率、記録にあるリセット時刻、最終確認時刻を表示し、古い記録と未取得を明示します。既存のDesktopの利用量ファイルと対応するローカルキャッシュだけを読み、通信や認証情報の読み取りは行いません。この追加機能は、上で案内している上流の配布版には含まれません。[ローカル記録のガイド](docs/USER_GUIDE.md#保存済みのclaudeの利用量を確認する)を参照してください。
-- **局所的な環境の適用 (Zero-Impact Isolation)**：Mac本体のシステム設定を無差別に上書きすることはありません。設定は本ツールから起動したアプリや特定のターミナルタブに対してのみ局所的に適用されます。既存のClaude環境には一切変更を加えません。
+- **このフォークでローカルCode全体を共有**：DesktopのローカルCodeサイドバー、ワークツリーの管理情報、保存済みのCodeプリセットを、ログインを分離したまま明示的に同期できます。全Claudeの終了とバックアップ後、参加環境の起動前に同期し、CLIへのログインは追加しません。`csw unshare-code`で無効にしても、現在のデータとログインは維持します。上流の配布版ではなく、[ローカルのアプリとCLI](docs/LOCAL_BUILD.md)が必要です。[共有のガイド](docs/USER_GUIDE.md#このフォークでローカルcode全体を共有する)を参照してください。
+- **局所的な環境の適用 (Zero-Impact Isolation)**：Mac本体のシステム設定を無差別に上書きすることはありません。設定は本ツールから起動したアプリや特定のターミナルタブに対してのみ局所的に適用されます。既定では既存のClaudeを維持します。ローカルCode全体の共有を明示的に有効にした場合はCodeストアも置き換え、サインイン情報は分離して保持します。
 
 ### 使用方法
 
 #### GUIワークフロー
 
-デスクトップアプリの管理に複雑な設定は不要です。すべて設定ウインドウで操作できます。
+通常の環境管理は設定ウインドウで操作できます。このフォークの任意の追加設定であるローカルCode全体の共有には、上で案内した専用コマンドを使います。
 
 1. **インストール＆起動**：`Claude-Desktop-Switcher.app`をアプリケーションフォルダに入れて起動。設定ウインドウが開きます。
 2. **環境の作成**：設定ウインドウで、ワンクリックで「業務」「研究」など、独立した環境を作成。

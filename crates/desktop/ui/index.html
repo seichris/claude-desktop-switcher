@@ -51,7 +51,7 @@
         <span class="wordmark-text">Claude Desktop Switcher</span>
       </div>
 
-      <!-- One environment rail. "既存の Claude" (the untouched baseline / default)
+      <!-- One environment rail. "既存の Claude" (the default / baseline)
            is rendered by renderSidebar() as the pinned first row, selectable like
            any other environment — not a separate card. -->
       <nav class="sidebar-section" aria-label="環境一覧">
@@ -155,7 +155,7 @@
                 <p class="empty-eyebrow">はじめまして</p>
               </div>
               <h1 class="empty-title">環境を分けて、混ぜない。</h1>
-              <p class="empty-lead">既存のClaudeはそのまま。そこを基準に、何を引き継ぎ何を分けるかを決めて、新しい環境を作ります。</p>
+              <p class="empty-lead">既存のClaudeを基準に、引き継ぐものと分けるものを選びます。ローカルCode全体の共有は、専用コマンドで有効にできます。</p>
 
               <ol class="steps">
                 <li class="step"><span class="step-num">1</span><span class="step-text" data-en="Press New environment"><strong>環境を作る</strong>を押す</span></li>
@@ -173,8 +173,8 @@
                   <div class="firstrun-row">
                     <span class="firstrun-icon"><svg class="icon"><use href="#i-monitor"/></svg></span>
                     <div>
-                      <p class="firstrun-head">いまの環境はそのまま残ります</p>
-                      <p class="firstrun-body">あなたが普段使っているClaudeデスクトップアプリとClaude Codeの環境は「既存のClaude」として保護され、設定・履歴・ログインは変更されません。</p>
+                      <p class="firstrun-head">ログインは環境ごとに保持します</p>
+                      <p class="firstrun-body">普段使っている環境は「既存のClaude」として保持します。ローカルCode全体の共有を明示的に有効にした場合だけCodeストアを同期し、ログインは変更しません。</p>
                     </div>
                   </div>
                   <div class="firstrun-row">

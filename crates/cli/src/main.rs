@@ -35,6 +35,9 @@ enum Commands {
         replace: bool,
     },
 
+    /// Stop complete local Code synchronization; preserve all data and logins.
+    UnshareCode,
+
     /// Manage environments
     Profile {
         #[command(subcommand)]
@@ -162,6 +165,13 @@ fn main() -> anyhow::Result<()> {
     let provider: Arc<dyn csw_core::platform::PlatformProvider> = Arc::from(create_provider()?);
 
     match cli.command {
+        Commands::UnshareCode => {
+            let manager = ProfileManager::new(provider.clone())?;
+            csw_core::native_code::disable(&manager, provider.as_ref())?;
+            println!(
+                "Complete local Code synchronization disabled. Existing data and logins were preserved."
+            );
+        }
         Commands::ShareCode {
             source,
             environments,

@@ -786,6 +786,9 @@ impl ProfileManager {
 
         // Ensure the profile exists (and the name is valid) before touching disk.
         self.get_profile(name)?;
+        if crate::native_code::is_shared(self.provider.as_ref(), name)? {
+            return Err(CswError::Other("Disable complete local Code sharing with csw unshare-code before deleting a participating environment".into()));
+        }
 
         let profiles_dir = self.app_config.lock().unwrap().profiles_dir.clone();
         Ok(profiles_dir.join(name))

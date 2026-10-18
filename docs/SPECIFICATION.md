@@ -20,7 +20,7 @@ Claudeデスクトップアプリは、ネイティブで複数アカウント�
 
 通常の共有プリセットとは独立して、`csw share-code --source default --replace <環境名>...`で、すでに会話履歴・メモリ・入力履歴を共有している環境のDesktop Codeストア全体を同期する。対象は`claude-code-sessions/<account>/<workspace>/`、`git-worktrees.json`、`ccd-session-presets.json`。レコードのフィールドは選別せず、Codeプリセットのアカウントキーだけを共有先へ対応付ける。全Claude Desktopの終了時にのみ動作し、起動経路は変更しない。追加のClaude Code CLIサインインは不要。
 
-初回は明示した元環境で上書きし、以後は切替前に指紋を比較して変更された1環境の完全なストアを引き継ぐ。複数環境の独立した変更、曖昧なアカウント・組織、リンク、ハードリンク、特殊ファイル、壊れたJSON、過大な入力を拒否する。全ストアの非公開バックアップ後に置き換え、通常のエラーでは復元する。認証、Cookie、ブラウザストレージ、Chat/Cowork、利用量キャッシュ、クラウドの一覧には触れない。参加環境と指紋は`native-code.toml`、バックアップは`native-code-backups/`に保存する。詳しくは[shared-desktop-code.md](proposals/shared-desktop-code.md)を参照。
+初回は明示した元環境で上書きし、以後は切替前に指紋を比較して変更された1環境の完全なストアを引き継ぐ。複数環境の独立した変更、曖昧なアカウント・組織、リンク、ハードリンク、特殊ファイル、壊れたJSON、過大な入力を拒否する。全ストアの非公開バックアップ後に置き換える。中断後は、処理記録と選んだ元データのバックアップから予定していたコピーを完了し、上書き前のデータもバックアップに維持する。認証、Cookie、ブラウザストレージ、Chat/Cowork、利用量キャッシュ、クラウドの一覧には触れない。参加環境と指紋は`native-code.toml`、バックアップは`native-code-backups/`、中断後にコピーを完了するための記録は`native-code-journal.json`に保存する。`csw unshare-code`は全Claude Desktopの終了後に以後の同期を無効にし、現在のローカルデータ・ログイン・バックアップと、別途共有している会話履歴・メモリ・入力履歴を維持する。参加環境の削除は無効化まで拒否する。起動は同期と同じロックで直列化し、`native-code-launch-pending`に予約を保存する。起動を確認できなければ同期を止め、全Claude終了後に`csw unshare-code`で解除して元環境を明示的に選び直す。詳しくは[shared-desktop-code.md](proposals/shared-desktop-code.md)を参照。
 
 ## 2. システムアーキテクチャ
 本アプリはRustのワークスペースで構成され、3つのクレートに分割されています。

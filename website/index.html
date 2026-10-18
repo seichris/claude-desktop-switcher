@@ -115,7 +115,7 @@
         <section id="screens" class="screens container fade-in">
             <div class="screens-header">
                 <h2>See it in action.</h2>
-                <p>The whole environment system lives in one settings window. Create an environment by choosing how much carries over, inspect exactly what each environment carries over, and switch environments right there.</p>
+                <p>The standard environment controls live in one settings window. Create an environment by choosing how much carries over, inspect exactly what each environment carries over, and switch environments right there.</p>
             </div>
             <div class="screens-bento">
                 <figure class="screen-card fade-in delay-1">
@@ -128,7 +128,7 @@
                 </figure>
                 <figure class="screen-card fade-in delay-2">
                     <img src="assets/screen_onboarding.png?v=0.24.6" width="1520" height="1948" alt="First-run onboarding explaining that the existing setup is preserved" loading="lazy">
-                    <figcaption>A short first-run tour shown only the first time. Your current setup is preserved as “Existing Claude” and never modified.</figcaption>
+                    <figcaption>A short first-run tour shown only the first time. Your current setup remains Existing Claude, with separate sign-ins. Complete local Code sharing requires explicit setup.</figcaption>
                 </figure>
             </div>
         </section>
@@ -255,7 +255,11 @@
                 </div>
                 <div class="faq-item">
                     <p class="faq-q">What is "Existing Claude"?</p>
-                    <p class="faq-a">Your existing Claude Desktop and Claude Code setup. CSW only uses it as the reference point and never changes or deletes your settings, history, or account sign-in.</p>
+                    <p class="faq-a">Your existing Claude Desktop and Claude Code setup. CSW uses it as the reference point. This fork only replaces its Code stores if you explicitly enable complete local Code sharing; sign-in storage is excluded.</p>
+                </div>
+                <div class="faq-item">
+                    <p class="faq-q">Can this fork share complete local Code data?</p>
+                    <p class="faq-a">Yes, as an explicit local setup with separate Desktop sign-ins. The full Code sidebar stores, worktree bookkeeping and saved presets synchronize before a participating launch, with all Claude instances stopped and backups taken first. Cloud Chat and Projects are excluded. No Claude Code CLI login is added. The local app and CLI are required; upstream downloads do not include this addition. Run <code>csw unshare-code</code> to stop future synchronization while preserving current data and sign-ins. See the <a href="https://github.com/seichris/claude-desktop-switcher/blob/main/docs/USER_GUIDE_EN.md#complete-local-code-sharing-in-this-fork" target="_blank" rel="noopener">local Code sharing guide</a>.</p>
                 </div>
                 <div class="faq-item">
                     <p class="faq-q">Does it work if I've customized where my existing config lives?</p>

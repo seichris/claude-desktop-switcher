@@ -230,3 +230,253 @@ fn symlinks_and_hardlinks_in_a_store_never_copy_an_external_file() {
     );
     assert!(!f.bucket(true).join("planted.json").exists());
 }
+
+#[test]
+fn removing_account_presets_propagates_back_to_the_original() {
+    let f = Fixture::new();
+    fs::write(
+        f.original.join("ccd-session-presets.json"),
+        format!(r#"{{"byAccount":{{"{ACCOUNT}":{{"name":"old"}}}}}}"#),
+    )
+    .unwrap();
+    f.enable();
+    let path = f.other.join("ccd-session-presets.json");
+    let mut presets: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    presets["byAccount"].as_object_mut().unwrap().remove(OTHER);
+    fs::write(path, serde_json::to_vec(&presets).unwrap()).unwrap();
+    let switcher = ContextSwitcher::new(f.provider.clone(), f.manager.clone());
+    switcher.switch_to("default").unwrap();
+    let presets: serde_json::Value =
+        serde_json::from_slice(&fs::read(f.original.join("ccd-session-presets.json")).unwrap())
+            .unwrap();
+    assert!(presets["byAccount"].get(ACCOUNT).is_none());
+}
+
+#[test]
+fn deleting_a_participant_requires_disabling_sharing_and_keeps_data() {
+    let f = Fixture::new();
+    f.enable();
+    assert!(f.manager.delete_profile("second").is_err());
+    assert!(f.manager.purge_profile("second").is_err());
+    assert!(f.other.exists());
+    native_code::disable(f.manager.as_ref(), f.provider.as_ref()).unwrap();
+    assert!(f.other.exists());
+    f.manager.delete_profile("second").unwrap();
+    ContextSwitcher::new(f.provider.clone(), f.manager.clone())
+        .switch_to("default")
+        .unwrap();
+}
+
+// Reconstruct a durable transaction exactly as a process killed between writes
+// leaves it. These fixtures never open real Claude data or authentication files.
+fn pending_journal(f: &Fixture, backup: &std::path::Path, prior: Option<&str>, planned: &str) {
+    let group: toml::Value = toml::from_str(planned).unwrap();
+    let journal = serde_json::json!({
+        "version": 1, "tag": backup.file_name().unwrap().to_str().unwrap(), "authority":"default",
+        "group": group, "prior_config": prior, "planned_config": planned,
+        "places": [["default", f.original, f.bucket(false)], ["second", f.other, f.bucket(true)]]
+    });
+    fs::write(
+        f.provider.app_data.join("native-code-journal.json"),
+        serde_json::to_vec(&journal).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn interrupted_initial_seeding_recovers_missing_bucket_and_partial_global_files() {
+    for missing_bucket in [false, true] {
+        let f = Fixture::new();
+        fs::write(f.bucket(false).join("seed.json"), r#"{"source":true}"#).unwrap();
+        fs::write(f.bucket(true).join("original.json"), r#"{"restore":true}"#).unwrap();
+        fs::write(f.other.join("git-worktrees.json"), r#"{"original":true}"#).unwrap();
+        let backup = native_code::configure(
+            f.manager.as_ref(),
+            f.provider.as_ref(),
+            "default",
+            &["second".into()],
+        )
+        .unwrap();
+        let config = f.provider.app_data.join("native-code.toml");
+        let planned = fs::read_to_string(&config).unwrap();
+        fs::remove_file(&config).unwrap();
+        if missing_bucket {
+            fs::rename(
+                f.bucket(true),
+                f.bucket(true).with_file_name(format!(
+                    ".csw-previous-{}",
+                    backup.file_name().unwrap().to_str().unwrap()
+                )),
+            )
+            .unwrap();
+        } else {
+            fs::write(f.other.join("git-worktrees.json"), r#"{"partial":true}"#).unwrap();
+        }
+        pending_journal(&f, &backup, None, &planned);
+        assert!(native_code::is_shared(f.provider.as_ref(), "second").is_err());
+        ContextSwitcher::new(f.provider.clone(), f.manager.clone())
+            .switch_to("default")
+            .unwrap();
+        assert!(!f.bucket(true).join("original.json").exists());
+        assert!(f.bucket(true).join("seed.json").exists());
+        assert!(!f.other.join("git-worktrees.json").exists());
+        assert!(config.exists());
+        assert_eq!(
+            fs::read_to_string(backup.join("1/bucket/original.json")).unwrap(),
+            r#"{"restore":true}"#
+        );
+        assert!(
+            !f.provider
+                .app_data
+                .join("native-code-journal.json")
+                .exists()
+        );
+    }
+}
+
+#[test]
+fn committed_journal_keeps_new_stores_and_only_cleans_transaction_debris() {
+    let f = Fixture::new();
+    fs::write(f.bucket(false).join("seed.json"), r#"{"seed":true}"#).unwrap();
+    let backup = native_code::configure(
+        f.manager.as_ref(),
+        f.provider.as_ref(),
+        "default",
+        &["second".into()],
+    )
+    .unwrap();
+    let planned = fs::read_to_string(f.provider.app_data.join("native-code.toml")).unwrap();
+    pending_journal(&f, &backup, None, &planned);
+    fs::write(
+        f.bucket(true).join("after-commit.json"),
+        r#"{"later":true}"#,
+    )
+    .unwrap();
+    let debris = f.bucket(true).with_file_name(format!(
+        ".csw-stage-{}",
+        backup.file_name().unwrap().to_str().unwrap()
+    ));
+    fs::create_dir(&debris).unwrap();
+    ContextSwitcher::new(f.provider.clone(), f.manager.clone())
+        .switch_to("second")
+        .unwrap();
+    assert!(f.bucket(true).join("seed.json").exists());
+    assert!(f.bucket(false).join("after-commit.json").exists());
+    assert!(!debris.exists());
+    assert!(
+        !f.provider
+            .app_data
+            .join("native-code-journal.json")
+            .exists()
+    );
+}
+
+#[test]
+fn interrupted_update_completes_the_planned_source_and_preserves_the_exact_prior_backup() {
+    let f = Fixture::new();
+    f.enable();
+    let config = f.provider.app_data.join("native-code.toml");
+    let prior = format!(
+        "# preserve user comments\n{}",
+        fs::read_to_string(&config).unwrap()
+    );
+    fs::write(&config, &prior).unwrap();
+    fs::write(f.bucket(false).join("new.json"), r#"{"new":true}"#).unwrap();
+    // A completed update supplies durable originals and planned fingerprints.
+    let backup = native_code::configure(
+        f.manager.as_ref(),
+        f.provider.as_ref(),
+        "default",
+        &["second".into()],
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(backup.join("native-code.toml")).unwrap(),
+        prior
+    );
+    let planned = fs::read_to_string(&config).unwrap();
+    fs::write(&config, &prior).unwrap();
+    pending_journal(&f, &backup, Some(&prior), &planned);
+    // Disable first completes the interrupted update, then removes only config.
+    native_code::disable(f.manager.as_ref(), f.provider.as_ref()).unwrap();
+    assert!(f.bucket(false).join("new.json").exists());
+    assert!(f.bucket(true).join("new.json").exists());
+    assert!(!config.exists());
+}
+
+#[test]
+fn interrupted_reseed_keeps_the_explicit_source_even_when_it_did_not_change() {
+    let f = Fixture::new();
+    fs::write(f.bucket(false).join("seed.json"), r#"{"seed":true}"#).unwrap();
+    f.enable();
+    let config = f.provider.app_data.join("native-code.toml");
+    let prior = fs::read_to_string(&config).unwrap();
+    fs::write(f.bucket(true).join("discard.json"), r#"{"discard":true}"#).unwrap();
+    let backup = native_code::configure(
+        f.manager.as_ref(),
+        f.provider.as_ref(),
+        "default",
+        &["second".into()],
+    )
+    .unwrap();
+    let planned = fs::read_to_string(&config).unwrap();
+    assert_ne!(prior, planned);
+    // Recreate termination before the destination was replaced.
+    fs::write(&config, &prior).unwrap();
+    fs::write(f.bucket(true).join("discard.json"), r#"{"discard":true}"#).unwrap();
+    pending_journal(&f, &backup, Some(&prior), &planned);
+    ContextSwitcher::new(f.provider.clone(), f.manager.clone())
+        .switch_to("second")
+        .unwrap();
+    assert!(!f.bucket(false).join("discard.json").exists());
+    assert!(!f.bucket(true).join("discard.json").exists());
+    assert!(backup.join("1/bucket/discard.json").exists());
+}
+
+#[test]
+fn launch_reservation_serializes_reseed_and_survives_an_interrupted_launcher() {
+    let f = Fixture::new();
+    f.enable();
+    let guard = native_code::launch_guard(f.provider.as_ref(), "default")
+        .unwrap()
+        .unwrap();
+    assert!(
+        native_code::configure(
+            f.manager.as_ref(),
+            f.provider.as_ref(),
+            "default",
+            &["second".into()]
+        )
+        .is_err()
+    );
+    drop(guard); // Simulate a launcher exiting before observing Claude startup.
+    assert!(
+        native_code::configure(
+            f.manager.as_ref(),
+            f.provider.as_ref(),
+            "default",
+            &["second".into()]
+        )
+        .is_err()
+    );
+    native_code::disable(f.manager.as_ref(), f.provider.as_ref()).unwrap();
+    f.enable();
+    let guard = native_code::launch_guard(f.provider.as_ref(), "default")
+        .unwrap()
+        .unwrap();
+    let running = MockPlatformProvider::new(
+        f.original.clone(),
+        f.provider.cli_default.clone(),
+        f.provider.app_data.clone(),
+    )
+    .with_desktop_running(true);
+    native_code::finish_launch(&running, true).unwrap();
+    drop(guard);
+    assert!(
+        !f.provider
+            .app_data
+            .join("native-code-launch-pending")
+            .exists()
+    );
+    assert!(native_code::launch_guard(&running, "second").is_err());
+}

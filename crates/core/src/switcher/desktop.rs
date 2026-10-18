@@ -4,15 +4,15 @@ use crate::profile::Profile;
 
 /// Launch Claude Desktop for the given profile using --user-data-dir
 pub fn launch_desktop(profile: &Profile, provider: &dyn PlatformProvider) -> Result<()> {
-    if crate::native_code::is_shared(provider, &profile.profile.name)?
-        && (provider.is_claude_desktop_running()? || !provider.running_desktop_args()?.is_empty())
-    {
-        return Err(crate::error::CswError::DesktopRunning);
-    }
-    provider.launch_claude_desktop(
+    let guard = crate::native_code::launch_guard(provider, &profile.profile.name)?;
+    let launched = provider.launch_claude_desktop(
         &profile.isolation.desktop_user_data_dir,
         Some(&profile.isolation.cli_config_dir),
-    )?;
+    );
+    if guard.is_some() {
+        crate::native_code::finish_launch(provider, launched.is_ok())?;
+    }
+    launched?;
 
     // Stamp the launch time for the environment list ("last launched"). Every
     // CSW-initiated launch funnels through here, so this is the single point
