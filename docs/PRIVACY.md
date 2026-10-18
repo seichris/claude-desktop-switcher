@@ -34,7 +34,7 @@ CSWはインターネットに接続しません。接続する仕組み自体�
 |---|---|
 | `~/.context-switcher-claude/config.toml` | いま選ばれている環境の名前 |
 | `~/.context-switcher-claude/session.toml` | 前回すべて閉じたときに同時に開いていた環境の名前 |
-| `~/.context-switcher-claude/native-code.toml`と`native-code.lock` | 明示的に有効にしたローカルCode共有の参加環境、変更の指紋、操作のロック |
+| `~/.context-switcher-claude/native-code.toml`と`native-code.lock`と`.native-code.toml-*` | 明示的に有効にしたローカルCode共有の参加環境、変更の指紋、操作のロック |
 | `~/.context-switcher-claude/native-code-journal.json`と`.csw-write-*` | 中断した置き換えを完了するための記録と、設定を保存する一時ファイル |
 | `~/.context-switcher-claude/native-code-launch-pending` | Claudeの起動を確認するか、明示的に解除するまで同期を止める起動の予約 |
 | `~/.context-switcher-claude/native-code-backups/` | 変更の同期前の非公開バックアップ、保存先の一覧、直前の共有設定 |

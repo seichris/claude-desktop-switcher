@@ -34,7 +34,7 @@ By default, CSW writes inside its own folder, `~/.context-switcher-claude/`. Del
 |---|---|
 | `~/.context-switcher-claude/config.toml` | The name of the currently selected environment |
 | `~/.context-switcher-claude/session.toml` | The environments that were open together when you last quit them all |
-| `~/.context-switcher-claude/native-code.toml` and `native-code.lock` | An explicitly enabled local Code sharing group, change fingerprints and an operation lock |
+| `~/.context-switcher-claude/native-code.toml` and `native-code.lock` and `.native-code.toml-*` | An explicitly enabled local Code sharing group, change fingerprints and an operation lock |
 | `~/.context-switcher-claude/native-code-journal.json` and `.csw-write-*` | Transaction recovery metadata and private temporary configuration files |
 | `~/.context-switcher-claude/native-code-launch-pending` | A launch reservation that blocks synchronization until Claude startup is observed or explicitly cleared |
 | `~/.context-switcher-claude/native-code-backups/` | Private snapshots before changed synchronizations, their locations manifest and the preceding sharing configuration |
