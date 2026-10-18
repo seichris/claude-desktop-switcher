@@ -48,7 +48,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Regenerate the 8 screenshots from the real UI
+      - name: Regenerate the 12 screenshots from the real UI
         run: node scripts/appshot/gen-screenshots.mjs
 
       - name: Regenerate the OG cards
@@ -57,7 +57,7 @@ jobs:
 
       - name: Commit and push the regenerated screenshots
         run: |
-          if git diff --quiet -- website/assets; then
+          if test -z "$(git status --porcelain -- website/assets)"; then
             echo "screenshots unchanged; nothing to push"
             exit 0
           fi

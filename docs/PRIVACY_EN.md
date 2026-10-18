@@ -54,7 +54,7 @@ In addition, the settings window stores three records for its display in the app
   3. **Copying**: for items you set to Copy when creating or duplicating an environment, it reads those files and copies them into the new environment. Only the items you chose are read, and the existing Claude's side is never modified.
   4. **Saved usage**: the usage view reads the Desktop files listed below. It does not read Claude Code's folder for usage.
   5. **Explicit complete local Code sharing**: the Code stores described below are read, backed up and replaced in every participant, including Existing Claude. Sign-in storage is excluded.
-- To tell which environment a running Claude is using, CSW reads the list of running processes and their launch arguments. It reads nothing else about those processes and no communication contents.
+- To tell which environment a running Claude is using, CSW reads the list of running processes and their launch arguments. A reserved launch also polls this metadata to wait until every Claude Desktop main process has exited and to observe the target after launching. This does not inspect task completion, process memory, environment variables, screen contents or communication contents.
 - The identifier of the frontmost application is read only when you press "Check the current environment" in the menu bar icon's menu, to answer which environment the Claude in front is using. Only the process identifier and its launch arguments are read; screen contents and window titles are never read. CSW never polls for it.
 - To check whether a CSW installer disk image is still mounted, CSW reads the list of mounted disk images with `hdiutil` when it starts and when you press "Eject". Only each disk image's file path and mount points are read. CSW picks out its own disk images by name and ignores all others, and it never reads the contents of any disk image.
 
@@ -74,6 +74,14 @@ The reader keeps each environment separate even when two accounts belong to the 
 Only the environment name, usage percentages, times, source, and display state reach the screen. Raw cache contents, response URLs, and organization identifiers are not returned to the screen, logged, or saved by CSW. Usage reports are held in memory rather than written as another cache.
 
 The last-checked time is the saved observation's time. A reading over 30 minutes old or past a displayed reset is marked stale. Missing values remain unavailable, and a passed reset never changes a saved percentage to zero. A cache can survive a change of sign-in, so a reading does not prove which account is signed in now. The official Claude app remains the place to verify current usage and account identity.
+
+## Waiting for manual quit before launching
+
+This fork's local app can hold one requested environment launch in memory while Claude Desktop is running. CSW never requests quit, sends termination signals, presses Claude's buttons or force quits. You finish the work and pending answers yourself, then quit Claude normally. Closing a window may not exit the app. No Accessibility permission or hook is used.
+
+The reservation contains the target environment, request identifier, state and a snapshot of CSW’s own environment metadata for revalidation. It is not written to a new file or browser storage, and quitting or restarting CSW clears it. Cancel is available only while waiting; after synchronization and launch begin, CSW cannot undo them. The target and stopped process state are revalidated before launch. Failure to inspect processes before that point prevents launching. After a launch request is sent, CSW observes startup without repeating it if inspection fails. If startup cannot be confirmed, an error is shown while the reservation stays held: cancellation, replacement and another launch remain blocked. A target that appears later completes the reservation. Restarting CSW clears the memory-only reservation, but cannot undo a submitted launch or clear the existing Code-sharing launch reservation.
+
+The existing normal launch path still writes the selected environment and its launch time as documented above. If complete local Code sharing is enabled, its existing backups, journal and launch reservation still apply; these are separate from the memory-only manual-quit reservation. The fully isolated Launch alongside action uses the same queue without waiting for unrelated instances to quit; it cannot bypass a pending reservation. Reopen is serialized with launches and is refused while a reservation is pending. No new data paths, OS commands, network access or credential reads are added.
 
 ## Complete local Code sharing
 
@@ -100,8 +108,8 @@ CSW runs only the following four standard macOS commands. All of them are local 
 | Command | Purpose |
 |---|---|
 | `open` | Launches Claude with the selected environment's data folder, opens the fixed links in your default browser, and opens an environment's data folder in Finder |
-| `pgrep` | Checks whether the Claude Desktop App is running |
-| `ps` | Reads the launch arguments of running Claude processes to learn which environment's data folder they use |
+| `pgrep` | Checks whether Claude Desktop is running, including while a reserved launch waits for manual quit |
+| `ps` | Reads Claude process identifiers and launch arguments to identify running environments, wait for manual quit, and observe the target after launch |
 | `hdiutil` | Detects a CSW installer disk image that is still mounted and ejects it |
 
 ## What CSW never touches

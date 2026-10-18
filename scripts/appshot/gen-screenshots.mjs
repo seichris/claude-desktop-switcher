@@ -25,6 +25,7 @@ import { fileURLToPath } from 'url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
 const UI = path.join(REPO, 'crates', 'desktop', 'ui');
+const WEBSITE = path.join(REPO, 'website');
 const OUT = process.env.CSW_APPSHOT_OUT || path.join(REPO, 'website', 'assets');
 fs.mkdirSync(OUT, { recursive: true });
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -37,10 +38,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.svg': 'image/svg+xml' };
 
 const server = http.createServer((req, res) => {
-  let u = decodeURIComponent(req.url.split('?')[0]); if (u.endsWith('/')) u += 'index.html';
-  const fp = path.normalize(path.join(UI, u)); if (!fp.startsWith(UI)) { res.statusCode = 403; return res.end('x'); }
+  let u;
+  try { u = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); }
+  catch { res.statusCode = 400; return res.end('bad path'); }
+  const root = u.startsWith('/site/') ? WEBSITE : UI;
+  if (root === WEBSITE) u = u.slice('/site'.length);
+  if (u.endsWith('/')) u += 'index.html';
+  const fp = path.resolve(root, '.' + u);
+  if (fp !== root && !fp.startsWith(root + path.sep)) { res.statusCode = 403; return res.end('x'); }
   fs.readFile(fp, (e, d) => { if (e) { res.statusCode = 404; return res.end('nf'); } res.setHeader('Content-Type', types[path.extname(fp)] || 'application/octet-stream'); res.end(d); });
-}).listen(PORT);
+}).listen(PORT, '127.0.0.1');
 const chrome = spawn(CHROME, ['--headless=new', '--hide-scrollbars', '--no-first-run', '--no-default-browser-check', `--remote-debugging-port=${DP}`, '--user-data-dir=/tmp/csw-appshot', 'about:blank']);
 
 let id = 0; const pending = new Map(); const errors = [];
@@ -113,6 +120,95 @@ async function main() {
     }
   }
 
+  async function checkPendingLaunch(env) {
+    const result = (await evalv(`(async()=>{
+      await doSwitch(${JSON.stringify(env)});
+      const first={...pendingLaunch};
+      await doSwitch(${JSON.stringify(env)});
+      const duplicate=pendingLaunch.request_id===first.request_id;
+      await doSwitch('Other synthetic environment');
+      const replacement=pendingLaunch.target===first.target;
+      await doCancelPendingLaunch();
+      const canceled=pendingLaunch.phase==='canceled'&&getComputedStyle(el.pendingLaunchBanner).display==='none';
+      await refreshPendingLaunch();
+      const stayedCanceled=pendingLaunch.phase==='canceled';
+      await doSwitch('<img src=x onerror=alert(1)>');
+      const literal=el.pendingLaunchTarget.textContent.includes('<img src=x onerror=alert(1)>')&&!el.pendingLaunchBanner.querySelector('img');
+      await doCancelPendingLaunch();
+      await doSwitch(${JSON.stringify(env)});
+      const waiting={...pendingLaunch};
+      window.__DEV_PENDING.switching();
+      acceptPendingLaunch(waiting);
+      const staleIgnored=pendingLaunch.phase==='switching';
+      const cancelHidden=getComputedStyle(el.btnCancelPendingLaunch).display==='none';
+      await doCancelPendingLaunch();
+      const committed=pendingLaunch.phase==='switching';
+      window.__DEV_PENDING.complete();
+      const completed=pendingLaunch.phase==='completed'&&getComputedStyle(el.pendingLaunchBanner).display==='none';
+      acceptPendingLaunch(waiting);
+      const oldIgnored=pendingLaunch.phase==='completed';
+      await doSwitch(${JSON.stringify(env)});
+      return {duplicate,replacement,canceled,stayedCanceled,literal,staleIgnored,cancelHidden,committed,completed,oldIgnored,waiting:pendingLaunch.phase==='waiting'};
+    })()`)).result?.value;
+    if (!result || Object.values(result).some(v=>v!==true)) throw new Error(`pending launch flow failed: ${JSON.stringify(result)}`);
+    for (const width of [600, 720, 760]) {
+      await cmd('Emulation.setDeviceMetricsOverride', { width, height: 600, deviceScaleFactor: 2, mobile: false });
+      await sleep(100);
+      const layout = (await evalv(`(()=>{
+        const banner=el.pendingLaunchBanner;
+        const nodes=[el.pendingLaunchTarget,el.pendingLaunchText,el.btnCancelPendingLaunch];
+        return {width:innerWidth,page:document.documentElement.scrollWidth,visible:getComputedStyle(banner).display!=='none',
+          overflow:nodes.filter(e=>e.scrollWidth>e.clientWidth+1).length,
+          inside:banner.getBoundingClientRect().right<=innerWidth&&banner.getBoundingClientRect().bottom<=innerHeight,
+          buttonLines:el.btnCancelPendingLaunch.scrollHeight<=el.btnCancelPendingLaunch.clientHeight+1};
+      })()`)).result?.value;
+      if (!layout || layout.width!==layout.page || !layout.visible || layout.overflow || !layout.inside || !layout.buttonLines) {
+        throw new Error(`pending launch layout failed: ${JSON.stringify(layout)}`);
+      }
+    }
+  }
+
+  async function checkLandingPages() {
+    async function assertLayout(lang, width, menuOpen) {
+      const result = (await evalv(`(()=>{
+        const visible=e=>{const s=getComputedStyle(e);return s.visibility!=='hidden'&&s.display!=='none'&&e.getBoundingClientRect().width>0;};
+        const metrics=e=>{const s=getComputedStyle(e);return {tag:e.tagName,cls:e.className,text:e.textContent.slice(0,60),
+          clientWidth:e.clientWidth,scrollWidth:e.scrollWidth,rectWidth:e.getBoundingClientRect().width,
+          visibility:s.visibility,display:s.display,transform:s.transform};};
+        const controls=[...document.querySelectorAll('h1,h2,h3,.faq-q,button,.btn,.nav-links a')].filter(visible);
+        const nav=document.querySelector('.nav-links');
+        const rect=nav?.getBoundingClientRect();
+        return {lang:document.documentElement.lang,width:innerWidth,page:document.documentElement.scrollWidth,
+          // clientWidth and scrollWidth use the same untransformed layout space.
+          overflow:controls.filter(e=>e.clientWidth>0&&e.scrollWidth>e.clientWidth+2).map(metrics),
+          menu:{open:document.body.classList.contains('nav-open'),expanded:document.querySelector('.nav-toggle')?.getAttribute('aria-expanded'),
+            visible:!!nav&&visible(nav),inside:!!rect&&rect.left>=0&&rect.right<=innerWidth,
+            controls:nav?[...nav.querySelectorAll('a,button')].filter(visible).map(metrics):[]}};
+      })()`)).result?.value;
+      if (!result || result.width !== result.page || result.overflow.length || !result.lang.startsWith(lang)
+          || (menuOpen && (!result.menu.open || result.menu.expanded !== 'true' || !result.menu.visible || !result.menu.inside || !result.menu.controls.length))) {
+        throw new Error(`landing page layout failed (${lang}, ${width}, menu ${menuOpen ? 'open' : 'closed'}): ${JSON.stringify(result)}`);
+      }
+    }
+    for (const lang of ['en', 'ja']) {
+      for (const width of [360, 390, 1024, 1200, 1440]) {
+        await cmd('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false });
+        await cmd('Page.navigate', { url: `http://127.0.0.1:${PORT}/site/${lang === 'ja' ? 'ja/' : ''}` });
+        await sleep(700);
+        await assertLayout(lang, width, false);
+        if (width <= 768) {
+          // Exercise the shipped menu handler rather than forcing a CSS class.
+          const clicked = (await evalv(`(()=>{const toggle=document.querySelector('.nav-toggle');
+            if(!toggle||getComputedStyle(toggle).display==='none')return false;toggle.click();return true;})()`)).result?.value;
+          if (!clicked) throw new Error(`mobile menu toggle unavailable (${lang}, ${width})`);
+          // The final child has a 280ms delay plus a 400ms transition.
+          await sleep(850);
+          await assertLayout(lang, width, true);
+        }
+      }
+    }
+  }
+
   const done = [];
   for (const { lang, prefix, env, summary } of LOCALES) {
     // onboarding: fresh first-run empty view
@@ -131,12 +227,23 @@ async function main() {
     await cmd('Emulation.setDeviceMetricsOverride', { width: 760, height: 900, deviceScaleFactor: 2, mobile: false });
     await sleep(150);
     await fit('usageScroll', `${prefix}screen_usage.png`);
+    // Manual quit: the real UI with synthetic requests only. No Claude launch,
+    // quitting, credentials, OS Accessibility or task state is used by this QA.
+    await load(lang); await clickEnv(env);
+    await checkPendingLaunch(env);
+    // Capture a fresh waiting request, without transient toasts or the mock
+    // process state deliberately exercised by the preceding flow checks.
+    await load(lang); await clickEnv(env);
+    await evalv(`doSwitch(${JSON.stringify(env)})`);
+    await crop(`${prefix}screen_pending_launch.png`, 760, 600);
     // hero: the sample env, disclosures collapsed, 760x498 crop
     await load(lang); await clickEnv(env); await sleep(300);
     await crop(`${prefix}hero.png`, 760, 498);
-    done.push(`${prefix}screen_onboarding.png, ${prefix}screen_overview.png, ${prefix}screen_create.png, ${prefix}screen_usage.png, ${prefix}hero.png`);
+    done.push(`${prefix}screen_onboarding.png, ${prefix}screen_overview.png, ${prefix}screen_create.png, ${prefix}screen_usage.png, ${prefix}screen_pending_launch.png, ${prefix}hero.png`);
   }
 
+  await checkLandingPages();
+  if (errors.length) throw new Error(`uncaught UI exceptions: ${JSON.stringify(errors)}`);
   console.log('regenerated:', done.join(' | '), '; errors:', errors.length ? JSON.stringify(errors) : 'none');
   ws.close();
 }

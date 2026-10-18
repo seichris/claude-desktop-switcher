@@ -52,8 +52,8 @@ const EN = {
   '普段使っている環境は「既存のClaude」として保持します。ローカルCode全体の共有を明示的に有効にした場合だけCodeストアを同期し、ログインは変更しません。':
     'Your everyday setup remains Existing Claude. Only explicitly enabling complete local Code sharing synchronizes its Code stores; sign-ins stay unchanged.',
   '環境を切り替えて使えます': 'Switch between environments',
-  '「利用中」は、いまClaudeが起動している環境です。Claudeを終了すれば「利用中」は外れ、その環境はまた「この環境を起動」から開き直せます。設定を共有する環境は衝突を防ぐため一度に1つずつ開くので、別の環境を開くときは先に起動中のClaudeを終了します。「すべて分ける」で作った環境は何も共有しないので、起動中のClaudeを終了せず、新しいウィンドウで並べて開けます。':
-    '"In use" marks the environment Claude is currently running for. Quit Claude and it clears, so you can reopen that environment from "Launch this environment". Environments that share settings open one at a time to avoid conflicts, so quit the running Claude before opening another. An environment set to "separate everything" shares nothing, so you can open it in a new window alongside a running Claude, without quitting.',
+  '「利用中」は、いまClaudeが起動している環境です。Claudeを終了すれば「利用中」は外れ、その環境はまた「この環境を起動」から開き直せます。設定を共有する環境は衝突を防ぐため一度に1つずつ開きます。次の環境を選んで起動を押すと、Claudeを手動ですべて終了するまで待ってから開きます。「すべて分ける」で作った環境は何も共有しないので、起動中のClaudeを終了せず、新しいウィンドウで並べて開けます。':
+    '"In use" marks the environment Claude is currently running for. Quit Claude and it clears, so you can reopen that environment from "Launch this environment". Environments that share settings open one at a time to avoid conflicts. Choose the next environment and press Launch; it opens after you manually quit every Claude instance. An environment set to "separate everything" shares nothing, so you can open it in a new window alongside a running Claude, without quitting.',
   'ターミナルのClaude Codeも同じ環境で使えます': 'Claude Code in the terminal uses the same environment',
   // Where to get csw: shown wherever the GUI names a csw command.
   'cswコマンドはアプリの.dmgに含まれておらず、アプリを更新しても更新されません。GitHubのリリースページから最新のcswを入手できます。':
@@ -93,8 +93,8 @@ const EN = {
     "Copies this environment's settings and data as they are into a new environment under a different name. The Claude Desktop App sign-in is copied too, so the duplicate carries the same sign-in state as the original. For a different account, create the environment with \"New environment\" instead.",
   '起動のしかた': 'How to launch',
   'この環境を起動': 'Launch this environment', '重複して起動': 'Launch alongside', '前面に表示': 'Bring to front',
-  'この環境でClaudeを開きます。ほかの環境のClaudeが起動しているときは、先に終了してから起動してください。':
-    'Opens Claude for this environment. If another environment’s Claude is running, quit it first, then launch.',
+  'この環境でClaudeを開きます。ほかのClaudeが起動中なら、手動ですべて終了するまで待ってから開きます。':
+    'Opens Claude for this environment. If another Claude is running, CSW waits for you to quit every instance, then opens the selected environment.',
   '起動中のClaudeを終了せずに、この環境を新しいウィンドウで同時に開きます。':
     'Opens this environment in a new window at the same time, without quitting a running Claude.',
   '既存のClaudeを起動': 'Launch Existing Claude',
@@ -107,9 +107,6 @@ const EN = {
   'ゴミ箱へ移動できませんでした。すぐに消す場合は「完全に削除」を選んでください。':
     'Could not move it to the Trash. To remove it now, choose "Delete permanently".',
   'やめる': 'Cancel', '複製を作る': 'Duplicate', '戻る': 'Back',
-  'この環境は、起動中のClaudeを終了せずに開けます。': 'You can open this environment without quitting a running Claude.',
-  '起動中のClaudeを終了してから、もう一度押してください。設定の衝突を防ぐため、共有を含む環境のClaudeは同時に開けません。':
-    'Quit the running Claude, then press this again. To avoid configuration conflicts, environments that share settings cannot be open at once.',
   '閉じる': 'Close', 'もう一度試す': 'Try again', '開き直す': 'Reopen',
   // Create flow
   '新しい環境を作る': 'Create a new environment',
@@ -363,6 +360,8 @@ let overrides = { ...PRESETS.isolate };
 let advancedCustomized = false;
 let usageReports = null;
 let usageReadPending = false;
+let pendingLaunch = { request_id: 0, target: null, phase: 'idle', error: null, wait_for_exit: true };
+let pendingRead = false;
 
 // --- DOM builder helpers (no innerHTML) -------------------------------------
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -442,6 +441,10 @@ function withTransition(update) {
 const el = {
   profileList: $('profileList'),
   dmgBanner: $('dmgBanner'),
+  pendingLaunchBanner: $('pendingLaunchBanner'),
+  pendingLaunchTarget: $('pendingLaunchTarget'),
+  pendingLaunchText: $('pendingLaunchText'),
+  btnCancelPendingLaunch: $('btnCancelPendingLaunch'),
   btnDmgEject: $('btnDmgEject'),
   btnDmgLater: $('btnDmgLater'),
   takeoverBanner: $('takeoverBanner'),
@@ -890,7 +893,7 @@ function launchHelp(supportsConcurrent) {
     h('p', { class: 'firstrun-head', text: head }),
     h('p', { class: 'firstrun-body', text: body }));
   const ways = [
-    way('この環境を起動', 'この環境でClaudeを開きます。ほかの環境のClaudeが起動しているときは、先に終了してから起動してください。'),
+    way('この環境を起動', 'この環境でClaudeを開きます。ほかのClaudeが起動中なら、手動ですべて終了するまで待ってから開きます。'),
   ];
   if (supportsConcurrent) {
     ways.push(way('重複して起動', '起動中のClaudeを終了せずに、この環境を新しいウィンドウで同時に開きます。'));
@@ -1356,53 +1359,78 @@ function showCloneRow(name) {
 }
 
 // --- Backend operations -----------------------------------------------------
-// Switching relinks shared/isolated config and launches that environment's
-// Claude. The core refuses to switch while Claude Desktop is running (to avoid
-// config write-back races), so only one environment's Claude runs at a time.
-// Guide the user to quit the running one first instead of showing a dead end.
-function showSwitchBlocked(name, supportsConcurrent) {
-  el.detailFooter.className = 'view-footer split';
-  // Fully-isolated environments never need the running Claude quit: point straight
-  // at opening a new window instead of a dead "quit first" instruction.
-  if (supportsConcurrent) {
-    el.detailFooter.replaceChildren(
-      h('span', { class: 'confirm-text', text: 'この環境は、起動中のClaudeを終了せずに開けます。' }),
-      h('div', { class: 'footer-group' },
-        h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => showDetail(name) }, '閉じる'),
-        h('button', { type: 'button', class: 'btn btn-primary', onclick: () => doLaunchNewWindow(name) },
-          h('span', { text: '重複して起動' }))));
-    return;
-  }
-  el.detailFooter.replaceChildren(
-    h('span', { class: 'confirm-text', text: '起動中のClaudeを終了してから、もう一度押してください。設定の衝突を防ぐため、共有を含む環境のClaudeは同時に開けません。' }),
-    h('div', { class: 'footer-group' },
-      h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => showDetail(name) }, '閉じる'),
-      h('button', { type: 'button', class: 'btn btn-primary', onclick: () => doSwitch(name, false) }, 'もう一度試す')));
+// The backend owns the one volatile request. Rendering never decides whether
+// Claude is idle or authorizes a launch; it only shows the process-exit wait.
+function launchError(code) {
+  if (code === 'launch_busy') return T('ほかの起動操作が進行中です。完了してから操作してください。', 'Another launch action is in progress. Wait for it to finish.');
+  if (code === 'launch_pending') return T('現在の起動予約を確認してください。終了待ちの間はキャンセルできます。', 'Check the current pending launch. You can cancel while it is waiting for you to quit Claude.');
+  if (code === 'launch_committed') return T('起動処理が始まったため、キャンセルできません。', 'Launching has started and can no longer be canceled.');
+  if (code === 'launch_unconfirmed') return T('Claudeの起動を確認できません。二重起動を防ぐため、再試行していません。CSWを再起動する前にClaudeの状態を確認してください。', 'Claude startup could not be confirmed. No retry was made to avoid a duplicate launch. Check Claude before restarting CSW.');
+  if (code === 'process_unavailable') return T('Claudeの起動状態を確認できません。追加の起動要求は送りません。', 'Could not verify Claude’s process state. No further launch request will be sent.');
+  if (code === 'target_changed' || code === 'target_unavailable') return T('予約した環境が変更または削除されたため、起動していません。環境を確認してから予約し直してください。', 'The requested environment changed or was removed. Check it before requesting another launch.');
+  return T('環境を起動できませんでした。Claudeと環境の状態を確認してください。', 'Could not launch the environment. Check Claude and the environment.');
 }
 
-async function doSwitch(name, supportsConcurrent) {
-  try {
-    if (await invoke('get_desktop_running_status')) { showSwitchBlocked(name, supportsConcurrent); return; }
-    await invoke('switch_profile', { name, noLaunch: false });
-    await refreshProfiles();
-    withTransition(() => showDetail(name));
-    showToast(name === 'default' ? T('既存のClaudeを起動しました', 'Launched Existing Claude') : T(`「${name}」のClaudeを起動しました`, `Launched Claude for "${name}"`));
-  } catch (err) {
-    if (String(err || '').includes('Claude Desktop is running')) { showSwitchBlocked(name, supportsConcurrent); return; }
-    showToast('起動できませんでした。もう一度お試しください。', true);
+function renderPendingLaunch() {
+  const status = pendingLaunch;
+  const visible = ['waiting', 'switching', 'failed'].includes(status.phase);
+  el.pendingLaunchBanner.hidden = !visible;
+  if (!visible) return;
+  const name = (status.targets || [status.target]).map(n => n === 'default' ? T('既存のClaude', 'Existing Claude') : n).join(T('、', ', '));
+  el.pendingLaunchTarget.textContent = T(`起動先：${name}`, `Launch target: ${name}`);
+  el.pendingLaunchText.textContent = status.error ? launchError(status.error)
+    : status.phase === 'waiting' && status.wait_for_exit
+      ? T('作業と質問への回答を終えて、ClaudeをCmd+Qで終了してください。すべてのClaudeが終了した後にこの環境を開きます。CSWはClaudeを終了しません。', 'Finish your work and answer pending questions, then quit Claude with Cmd+Q. This environment opens after every Claude instance has exited. CSW does not quit Claude.')
+      : T('Claudeの起動を確認しています。起動要求は再送しません。', 'Confirming Claude startup. The launch request will not be repeated.');
+  el.btnCancelPendingLaunch.hidden = status.phase !== 'waiting';
+}
+
+function acceptPendingLaunch(status) {
+  if (!status || status.request_id < pendingLaunch.request_id) return;
+  // A command response can arrive after its matching event. Terminal states
+  // cannot be rolled back to an earlier Waiting/Switching response.
+  if (status.request_id === pendingLaunch.request_id) {
+    const rank = { idle: 0, waiting: 1, switching: 2, failed: 3, completed: 4, canceled: 4 };
+    if (rank[status.phase] < rank[pendingLaunch.phase]) return;
   }
+  const before = pendingLaunch;
+  pendingLaunch = status;
+  renderPendingLaunch();
+  if (before.request_id === status.request_id && before.phase === status.phase) return;
+  if (status.phase === 'completed') {
+    showToast(T('選んだ環境のClaudeを開きました。', 'Opened Claude for the selected environment.'));
+    refreshProfiles();
+  } else if (status.phase === 'canceled') {
+    showToast(T('起動予約をキャンセルしました。', 'Pending launch canceled.'));
+  }
+}
+
+async function refreshPendingLaunch() {
+  if (pendingRead) return;
+  pendingRead = true;
+  try { acceptPendingLaunch(await invoke('get_pending_launch')); }
+  catch (e) { /* Preserve the last known status; never infer that it is idle. */ }
+  finally { pendingRead = false; }
+}
+
+async function doCancelPendingLaunch() {
+  const requestId = pendingLaunch.request_id;
+  try { acceptPendingLaunch(await invoke('cancel_pending_launch', { requestId })); }
+  catch (err) { showToast(launchError(String(err)), true); await refreshPendingLaunch(); }
+}
+
+async function doSwitch(name) {
+  try { acceptPendingLaunch(await invoke('request_environment_launch', { name })); }
+  catch (err) { showToast(launchError(String(err)), true); await refreshPendingLaunch(); }
 }
 
 // Open a fully-isolated environment in an additional window, alongside whatever is
 // already running. Does not switch the active environment or require quitting.
 async function doLaunchNewWindow(name) {
   try {
-    await invoke('launch_additional_window', { name });
-    await refreshProfiles();
-    withTransition(() => showDetail(name));
-    showToast(T(`「${name}」を新しいウィンドウで起動しました`, `Launched "${name}" in a new window`));
+    acceptPendingLaunch(await invoke('launch_additional_window', { name }));
   } catch (err) {
-    showToast('起動できませんでした。もう一度お試しください。', true);
+    showToast(launchError(String(err)), true); await refreshPendingLaunch();
   }
 }
 
@@ -1730,6 +1758,7 @@ async function refreshRunning() {
   catch (e) { reopenOffer = []; }
   renderTakeover();
   renderReopen();
+  await refreshPendingLaunch();
 }
 
 // The reopen-previous-set offer. The watcher records which environments were
@@ -1822,6 +1851,8 @@ async function revalidateRunning() {
 
 // --- Init -------------------------------------------------------------------
 function wireEvents() {
+  el.btnCancelPendingLaunch.addEventListener('click', doCancelPendingLaunch);
+  setInterval(refreshPendingLaunch, 1000);
   el.btnCreate.addEventListener('click', () => withTransition(showCreate));
   el.btnCreateEmpty.addEventListener('click', () => withTransition(showCreate));
   el.btnUsage.addEventListener('click', () => withTransition(showUsage));
@@ -1857,6 +1888,8 @@ function wireEvents() {
   // before showing this window, then emits the result here.
   if (HAS_TAURI && window.__TAURI__.event) {
     window.__TAURI__.event.listen('whereami', (e) => handleWhereami(e.payload));
+    window.__TAURI__.event.listen('pending-launch-changed', (e) => acceptPendingLaunch(e.payload));
+    window.__TAURI__.event.listen('pending-launch-error', (e) => showToast(launchError(e.payload), true));
   } else {
     // Browser QA drives the same handler directly.
     window.__DEV_WHEREAMI = handleWhereami;
@@ -2055,6 +2088,17 @@ document.addEventListener('DOMContentLoaded', init);
 // so flows that re-fetch details (note edit -> signpost quote) behave like the
 // real backend, which re-reads profile.toml.
 const DEV_NOTES = new Map();
+let devPending = { request_id: 0, target: null, phase: 'idle', error: null, wait_for_exit: true };
+let devRunning = ['default'];
+if (!HAS_TAURI) window.__DEV_PENDING = {
+  complete() {
+    if (!['waiting', 'switching'].includes(devPending.phase)) return;
+    devRunning = [devPending.target];
+    devPending = { ...devPending, phase: 'completed', error: null };
+    acceptPendingLaunch({ ...devPending });
+  },
+  switching() { devPending = { ...devPending, phase: 'switching' }; acceptPendingLaunch({ ...devPending }); },
+};
 
 function devInvoke(cmd, args) {
   // Locale-aware sample names so English screenshots read naturally. Real user
@@ -2094,6 +2138,22 @@ function devInvoke(cmd, args) {
     if (sample[name]) sample[name].note = note;
   }
   switch (cmd) {
+    case 'get_pending_launch': return Promise.resolve({ ...devPending });
+    case 'request_environment_launch':
+    case 'launch_additional_window': {
+      if (['waiting', 'switching'].includes(devPending.phase)) {
+        if (devPending.target === args.name) return Promise.resolve({ ...devPending });
+        return Promise.reject('launch_pending');
+      }
+      devPending = { request_id: devPending.request_id + 1, target: args.name, phase: 'waiting', error: null, wait_for_exit: cmd !== 'launch_additional_window' };
+      return Promise.resolve({ ...devPending });
+    }
+    case 'cancel_pending_launch': {
+      if (args.requestId !== devPending.request_id) return Promise.reject('launch_stale');
+      if (devPending.phase !== 'waiting') return Promise.reject('launch_committed');
+      devPending = { ...devPending, phase: 'canceled' };
+      return Promise.resolve({ ...devPending });
+    }
     case 'get_usage_reports': {
       const now = Date.now();
       const window = (key, used_percent, resets_at_ms, state = 'available') => ({ key, used_percent, resets_at_ms, state });
@@ -2121,12 +2181,10 @@ function devInvoke(cmd, args) {
     case 'get_desktop_running_status':
       // Depict the active environment as actually running so screenshots show the
       // "利用中" marker (the realistic state when Claude is open for that account).
-      return Promise.resolve(true);
+      return Promise.resolve(devRunning.length > 0);
     case 'get_running_profiles':
       // The existing Claude is depicted as running (mirrors get_desktop_running_status).
-      return Promise.resolve(['default']);
-    case 'launch_additional_window':
-      return Promise.resolve(null);
+      return Promise.resolve([...devRunning]);
     case 'activate_environment':
       // Dev mock: pretend the environment's Claude was found and raised.
       return Promise.resolve(true);

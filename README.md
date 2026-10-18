@@ -42,6 +42,7 @@ How should you partition your environments on a single PC? You can flexibly adju
 
 - **Integrated Management for GUI & CLI**: Centrally manages the environments behind the Claude Desktop App and Claude Code (CLI). Switch GUI environments by selecting one; sync the CLI to the same isolated environment by running a command in a separate terminal.
 - **Customizable Isolation**: You can choose which settings to share and which data to separate based on your use case.
+- **Launch after manual quit in this fork**: Select the next environment first. If Claude Desktop is running, the local app reserves the launch and waits for you to finish work and quit every Desktop instance normally. The settings window shows the target and cancellation while waiting; CSW never requests quit or detects task completion. The reservation clears when CSW quits. No Accessibility permission or extra CLI sign-in is needed. Requires [the local app](docs/LOCAL_BUILD.md); see [the manual-quit guide](docs/USER_GUIDE_EN.md#launch-after-you-quit-claude).
 - **Saved Claude usage in this fork**: Local builds show each discovered environment's saved usage percentages, available resets, and last-checked time. Stale and missing data are explicit. The reader uses only existing Desktop usage files and matching local cache responses, with no network requests or credential access. This addition is not part of the upstream downloads linked above; see [the local-cache guide](docs/USER_GUIDE_EN.md#checking-saved-claude-usage).
 - **Complete local Code sharing in this fork**: Explicitly synchronize the full local Desktop Code sidebar, worktree bookkeeping and saved presets between environments, keeping Desktop sign-ins separate. Synchronization runs before a participating launch with Claude stopped, after backups, without a CLI login. Disable it with `csw unshare-code`; current data and logins remain. This addition requires [the local app and CLI](docs/LOCAL_BUILD.md), rather than the upstream downloads. See the [sharing guide](docs/USER_GUIDE_EN.md#complete-local-code-sharing-in-this-fork).
 - **Zero-Impact Isolation**: It does not arbitrarily overwrite your Mac's global system settings. Settings are applied locally only to the apps or specific terminal tabs launched by this tool. Existing Claude is preserved by default. Explicitly enabling complete local Code sharing additionally replaces its Code stores, while leaving sign-in storage separate.
@@ -54,7 +55,7 @@ Standard environment management is available in the settings window. This fork's
 
 1. **Install & Launch**: Place `Claude-Desktop-Switcher.app` in your Applications folder and launch it. The settings window opens.
 2. **Create Environments**: In the settings window, create independent environments such as "Work" or "Research" with a single click.
-3. **Launch in Isolated Environment**: Select an environment and press "Launch this environment" (`この環境を起動`); that environment's Claude Desktop App launches against its own isolated directory. Environments that share settings open one at a time, so quit a running Claude before launching another. An environment set to "separate everything" shares nothing, so you can open it alongside a running Claude with "Launch alongside" (`重複して起動`), without quitting.
+3. **Launch in Isolated Environment**: Select an environment and press "Launch this environment" (`この環境を起動`); that environment's Claude Desktop App launches against its own isolated directory. In this fork's local app, if another Claude is running, the launch waits until you finish work and quit every Claude Desktop instance normally with Cmd+Q. Closing a window may leave the app running. Upstream downloads require quitting Claude before pressing the launch button. An environment set to "separate everything" shares nothing, so you can instead open it alongside a running Claude with "Launch alongside" (`重複して起動`), without quitting.
 
 ### Terminal (Claude Code) Integration
 
@@ -154,6 +155,7 @@ MIT
 
 - **GUIとCLIの統合環境管理**：ClaudeデスクトップアプリとClaude Code（CLI）の背後の環境を一元管理します。GUIの環境を選んで切り替えるほか、別に開いたターミナルでコマンドを実行すれば、CLIも同じ隔離環境へ同期できます。
 - **分離度のカスタマイズ**：共有したい設定と分けたいデータを用途に合わせて選択可能です。
+- **このフォークの手動終了後の起動**：先に次の環境を選びます。Claude Desktopが起動中なら、ローカルアプリが起動を予約し、作業を終えてすべてのDesktopを通常終了するまで待ちます。待機中は設定ウインドウに予約先とキャンセルを表示します。CSWは終了要求や作業の完了判定を行いません。CSWを終了すると予約は消えます。Accessibilityの許可や追加のCLIログインは不要です。[ローカルアプリ](docs/LOCAL_BUILD.md)が必要です。[手動終了後の起動のガイド](docs/USER_GUIDE.md#claudeを終了してから予約した環境を開く)を参照してください。
 - **このフォークで保存済みのClaudeの利用量を表示**：ローカルビルドでは、見つかった各環境の使用率、記録にあるリセット時刻、最終確認時刻を表示し、古い記録と未取得を明示します。既存のDesktopの利用量ファイルと対応するローカルキャッシュだけを読み、通信や認証情報の読み取りは行いません。この追加機能は、上で案内している上流の配布版には含まれません。[ローカル記録のガイド](docs/USER_GUIDE.md#保存済みのclaudeの利用量を確認する)を参照してください。
 - **このフォークでローカルCode全体を共有**：DesktopのローカルCodeサイドバー、ワークツリーの管理情報、保存済みのCodeプリセットを、ログインを分離したまま明示的に同期できます。全Claudeの終了とバックアップ後、参加環境の起動前に同期し、CLIへのログインは追加しません。`csw unshare-code`で無効にしても、現在のデータとログインは維持します。上流の配布版ではなく、[ローカルのアプリとCLI](docs/LOCAL_BUILD.md)が必要です。[共有のガイド](docs/USER_GUIDE.md#このフォークでローカルcode全体を共有する)を参照してください。
 - **局所的な環境の適用 (Zero-Impact Isolation)**：Mac本体のシステム設定を無差別に上書きすることはありません。設定は本ツールから起動したアプリや特定のターミナルタブに対してのみ局所的に適用されます。既定では既存のClaudeを維持します。ローカルCode全体の共有を明示的に有効にした場合はCodeストアも置き換え、サインイン情報は分離して保持します。
@@ -166,7 +168,7 @@ MIT
 
 1. **インストール＆起動**：`Claude-Desktop-Switcher.app`をアプリケーションフォルダに入れて起動。設定ウインドウが開きます。
 2. **環境の作成**：設定ウインドウで、ワンクリックで「業務」「研究」など、独立した環境を作成。
-3. **分離環境での起動**：環境を選んで「この環境を起動」を押すと、その環境専用の隔離ディレクトリでClaudeデスクトップアプリが起動します。設定を共有する環境は衝突を防ぐため一度に1つずつなので、起動する前に起動中のClaudeを終了してください。「すべて分ける」で作った環境は何も共有しないため、起動中のClaudeを終了せず「重複して起動」で並べて開けます。
+3. **分離環境での起動**：環境を選んで「この環境を起動」を押すと、その環境専用の隔離ディレクトリでClaudeデスクトップアプリが起動します。このフォークのローカルアプリでは、別のClaudeが起動中なら、作業を終えてすべてのClaude DesktopをCmd+Qで通常終了するまで起動を待ちます。ウィンドウを閉じただけでは、アプリが動き続ける場合があります。上流の配布版では、起動ボタンを押す前にClaudeを終了してください。「すべて分ける」で作った環境は何も共有しないため、代わりに「重複して起動」で並べて開けます。
 
 #### ターミナル（Claude Code）連携
 

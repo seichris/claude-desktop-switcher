@@ -85,13 +85,30 @@ For other cases (such as "I want to reuse my global rules, skills, and plugins, 
 Here is the daily usage flow after setup. No manual configuration is required.
 
 ### Scenario A: Starting work with your Work account
-1. If the environment you are about to open shares settings and another Claude Desktop app is running, quit it first: environments that share settings open one at a time to avoid configuration conflicts. An environment set to "separate everything" can be opened in a new window without quitting.
-2. In the settings window, select the "Work" environment you created. You can also open the settings window from the menu bar or Dock icon. The list shows each environment's note and when it was last launched, so you can find the right one at a glance even as you add more environments.
-3. **Press "Launch this environment", and that environment's dedicated Claude Desktop app launches.**
-   This window runs on this environment's own data directory. Sign in with your work account the first time you open it. CSW also shows a short guide card with the same reminder on that first launch.
+1. In the settings window, select the "Work" environment you created. You can also open the settings window from the menu bar or Dock icon. The list shows each environment's note and when it was last launched, so you can find the right one at a glance even as you add more environments.
+2. **Press "Launch this environment".** If another Claude Desktop instance is running, local builds of this fork reserve the launch and show the target while waiting for you to quit Claude. Upstream downloads require quitting Claude before pressing the launch button. See "Launch after you quit Claude" below.
+3. Finish running work and answer pending questions, then quit Claude normally with **Claude > Quit Claude** or **Cmd+Q**. Closing its window may leave the app running. With the local build, CSW opens the reserved environment once every Claude Desktop instance has exited.
+
+The opened window uses that environment's own data directory and existing Desktop sign-in. Sign in with your work account only on its first launch. CSW also shows a short guide card on that first launch.
 
 > **Note: running environments at the same time**
-> Environments created with "separate conversations and memory too" or "separate the account only" share settings, so they open one at a time to avoid configuration conflicts. To go back to your personal setup, quit the running Claude, select "Existing Claude" in the sidebar and press "Launch Existing Claude". It returns to your Existing Claude and opens it. An environment set to "separate everything" shares nothing, so you can open it alongside a running Claude with "Launch alongside" in the detail view, without quitting.
+> Environments created with "separate conversations and memory too" or "separate the account only" share settings, so they open one at a time to avoid configuration conflicts. To go back to your personal setup, select "Existing Claude" in the sidebar and press "Launch Existing Claude". In this fork's local build, quit the running Claude when your work is finished and CSW opens the reserved environment. With upstream downloads, quit Claude before pressing the button. An environment set to "separate everything" shares nothing, so you can open it alongside a running Claude with "Launch alongside" in the detail view, without quitting.
+
+### Launch after you quit Claude
+
+This is available in this fork's local app, version `0.24.6-local.6` or later, rather than the upstream downloads. See [Local security build](LOCAL_BUILD.md) for the build and installation scope.
+
+Select the next environment and press its launch button, or choose it from the menu bar. If another Claude Desktop instance is running, the settings window shows the reserved target and **Cancel**. Keep CSW running while you finish work in Claude. CSW waits for you to quit every Claude Desktop instance, then runs its normal stopped-state synchronization and launch. Any configured local Code sharing still backs up and validates its stores before synchronization.
+
+![Launch waiting for manual quit](../website/assets/screen_pending_launch.png)
+
+- CSW does not detect completed tasks, answer questions, request quit, press buttons in Claude, or force quit. You decide when to quit. No Accessibility permission, hook, extra CLI sign-in or network access is needed.
+- Cancel while the status is waiting to prevent the launch. To choose a different target, cancel the existing reservation first. Repeating a request for the same target keeps one reservation. Once synchronization and launch have started, cancellation is unavailable.
+- The reservation exists only in CSW's memory. Quitting or restarting CSW clears it; it does not reopen an old reservation at startup.
+- Before synchronization and launch begin, a failed process inspection or a changed or missing target stops the reserved launch. Check the notice and make a new request when the issue is resolved. After launch is submitted, CSW keeps the reservation until it observes the target running. If startup is uncertain, it shows an error while keeping that reservation: cancellation, replacement and another launch are blocked to avoid duplicates. Observation continues, so a late startup can complete the reservation. Check Claude’s state before restarting CSW; restarting clears this memory-only reservation, but does not undo any launch or the existing Code-sharing safeguards.
+- With no other pending launch, selecting an environment already in use brings its Claude to the front. **Launch alongside** uses the same queue for fully isolated environments, but does not wait for unrelated Claude instances to quit. It cannot bypass an existing reservation.
+
+The **Reopen** action is refused while a launch reservation is pending and is serialized with other launches. The `csw switch` command does not reserve a launch: it continues to refuse a switch while Claude Desktop is running.
 
 ### Scenario B: Using Claude Code in the terminal
 There are two kinds of terminal, and they need different steps. In either case, the first time you use Claude Code in an environment, you need to sign in to the CLI once (see "First time only: signing in to Claude Code" below).
@@ -112,7 +129,7 @@ This command needs the `csw` CLI. Download the signed, notarized `csw` binary fr
 The Claude Code (CLI) sign-in is managed separately from the desktop app's sign-in, and it is needed once per environment. In either terminal above, running `claude` in an environment you haven't signed into yet will prompt you to sign in. Follow the prompts and, from the sign-in options, choose the subscription account (your Claude account); this is different from the API-billed account. Once you sign in, it persists for that environment, so you don't need to sign in again on later runs or when you switch environments. The built-in terminal and an external terminal switched into the same environment share the same sign-in.
 
 ### Scenario C: Returning to your usual personal environment
-* **Desktop**: Select "Existing Claude" in the settings window (or from the menu bar icon), or simply launch `Claude.app` normally via Spotlight. It will always open your standard personal environment.
+* **Desktop**: Select "Existing Claude" in the settings window and press "Launch Existing Claude", or choose it from the menu bar. If CSW is waiting for quit, finish your work and quit every Claude Desktop instance normally. Launching `Claude.app` directly via Spotlight uses Existing Claude and does not run CSW's synchronization.
 * **CLI**: If you open a standard terminal and type `claude`, it will always operate as your personal Existing Claude environment.
 
 ### Checking saved Claude usage
@@ -216,5 +233,5 @@ Yes. Press **"Check the current environment"** in the menu bar icon's menu: CSW 
 Yes, it can happen. The automatic relaunch after an update does not go through CSW, so the reopened Claude runs on Existing Claude's data. The window looks the same, but the "In use" marker in CSW moves to Existing Claude, and if CSW is running, the settings window shows a notice. To continue in your environment, quit Claude and press "Launch this environment" again.
 
 **Q. Reopening every environment by hand after each update is tedious.**
-Applying an update requires quitting every running Claude (the app's updater waits for them all to quit before it swaps the app). So CSW remembers the environments that were open together the last time you quit them all, and a single "Reopen" in the settings window banner opens them again. Environments already running are skipped automatically. If a shared environment cannot run alongside another Claude, only that one is flagged with "quit the Claude that is running" first. Nothing launches automatically; it opens only when you press the button.
+Applying an update requires quitting every running Claude (the app's updater waits for them all to quit before it swaps the app). So CSW remembers the environments that were open together the last time you quit them all, and a single "Reopen" in the settings window banner opens them again. Environments already running are skipped automatically. If a shared environment cannot run alongside another Claude, only that one is flagged with "quit the Claude that is running" first. This "Reopen" action launches only when you press its button. A launch you reserved separately follows the manual-quit workflow above.
 

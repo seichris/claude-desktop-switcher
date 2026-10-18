@@ -11,12 +11,19 @@ use tauri::{
 mod dmg;
 mod usage_cache;
 
+use csw_core::switcher::pending::{
+    DesktopLaunchOperations, DesktopState, LaunchOperations, LaunchPhase, LaunchQueue,
+    PendingLaunch,
+};
+
 use csw_core::platform::create_provider;
 use csw_core::profile::{ProfileManager, SharingConfig, SharingMode};
 use csw_core::switcher::{ContextSwitcher, desktop_dir_running};
 
 // Global state holding our components
 struct AppState {
+    launch_queue: Arc<LaunchQueue>,
+    launch_operations: Arc<DesktopLaunchOperations>,
     provider: Arc<dyn csw_core::platform::PlatformProvider + Send + Sync>,
     profile_manager: Arc<ProfileManager>,
     /// Set when the running-state watcher sees an environment's Claude vanish
@@ -216,6 +223,7 @@ async fn create_profile(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
+    let _reservation = state.launch_queue.reserve_idle().map_err(str::to_string)?;
     let sharing = build_sharing_config(&mode, sharing_overrides);
 
     // Validate the note before creating: a rejected note after creation would
@@ -250,6 +258,7 @@ async fn set_profile_note(
     note: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let _reservation = state.launch_queue.reserve_idle().map_err(str::to_string)?;
     state
         .profile_manager
         .set_profile_note(&name, &note)
@@ -262,6 +271,7 @@ async fn delete_profile(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
+    let _reservation = state.launch_queue.reserve_idle().map_err(str::to_string)?;
     state
         .profile_manager
         .delete_profile(&name)
@@ -278,6 +288,7 @@ async fn purge_profile(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
+    let _reservation = state.launch_queue.reserve_idle().map_err(str::to_string)?;
     state
         .profile_manager
         .purge_profile(&name)
@@ -293,6 +304,7 @@ async fn clone_profile(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
+    let _reservation = state.launch_queue.reserve_idle().map_err(str::to_string)?;
     // The note carries over from the source inside clone_profile; the detail
     // screen edits it afterwards, so the clone flow takes no note input.
     state
@@ -355,31 +367,55 @@ async fn reveal_profile_dir(
         .map_err(|e| e.to_string())
 }
 
+fn emit_launch_status(app: &AppHandle, status: &PendingLaunch) {
+    use tauri::Emitter;
+    let _ = app.emit("pending-launch-changed", status);
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let _ = update_tray_menu(&handle);
+    });
+}
+
 #[tauri::command]
-async fn switch_profile(
+async fn request_environment_launch(
     name: String,
-    no_launch: bool,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<(), String> {
-    let switcher = ContextSwitcher::new(state.provider.clone(), state.profile_manager.clone());
-    switcher.switch_to(&name).map_err(|e| e.to_string())?;
+) -> Result<PendingLaunch, String> {
+    let queue = state.launch_queue.clone();
+    let operations = state.launch_operations.clone();
+    let status =
+        tauri::async_runtime::spawn_blocking(move || queue.request(&name, operations.as_ref()))
+            .await
+            .map_err(|_| "launch_unavailable".to_string())?
+            .map_err(str::to_string)?;
+    emit_launch_status(&app, &status);
+    Ok(status)
+}
 
-    // Update system tray menu
-    update_tray_menu(&app)?;
+#[tauri::command]
+fn get_pending_launch(state: State<'_, AppState>) -> Result<PendingLaunch, String> {
+    state.launch_queue.status().map_err(str::to_string)
+}
 
-    // Auto-launch after switching, including back to the default ("既存の Claude").
-    // For default this resolves to the standard data dirs, so it is equivalent to a
-    // normal Finder/Dock launch; `open -n` starts a fresh LaunchServices process that
-    // inherits no CSW state, and switching is already refused while Claude is running.
-    if !no_launch {
-        let profile = state
-            .profile_manager
-            .get_profile(&name)
-            .map_err(|e| e.to_string())?;
-        let _ = csw_core::switcher::desktop::launch_desktop(&profile, state.provider.as_ref());
+#[tauri::command]
+fn cancel_pending_launch(
+    request_id: u64,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<PendingLaunch, String> {
+    let status = state
+        .launch_queue
+        .cancel(request_id)
+        .map_err(str::to_string)?;
+    emit_launch_status(&app, &status);
+    Ok(status)
+}
+
+fn ensure_no_pending_launch(state: &AppState) -> Result<(), String> {
+    if state.launch_queue.is_pending().map_err(str::to_string)? {
+        return Err("launch_pending".into());
     }
-
     Ok(())
 }
 
@@ -392,7 +428,7 @@ async fn get_desktop_running_status(state: State<'_, AppState>) -> Result<bool, 
 }
 
 /// Launch a fully-isolated environment in an additional window, alongside whatever
-/// Claude is already running. Unlike `switch_profile`, this neither changes the
+/// Claude is already running. Unlike a normal queued launch, this neither changes the
 /// active environment nor requires quitting a running Claude first: fully-isolated
 /// environments share nothing, so concurrent instances cannot race on a shared
 /// file. Refused for the default environment and for any environment that shares
@@ -402,23 +438,17 @@ async fn launch_additional_window(
     name: String,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<(), String> {
-    let profile = state
-        .profile_manager
-        .get_profile(&name)
-        .map_err(|e| e.to_string())?;
-    if profile.profile.is_default || !profile.sharing.is_fully_isolated() {
-        return Err(
-            "この環境は完全分離ではないため、複数のウィンドウで同時に開けません。".to_string(),
-        );
-    }
-    csw_core::switcher::desktop::launch_desktop(&profile, state.provider.as_ref())
-        .map_err(|e| e.to_string())?;
-    // Best-effort: the new process may not appear in the process list instantly,
-    // so the 3s running-state watcher is what ultimately refreshes the "利用中"
-    // markers; rebuild now anyway so an already-visible change is reflected early.
-    update_tray_menu(&app)?;
-    Ok(())
+) -> Result<PendingLaunch, String> {
+    let queue = state.launch_queue.clone();
+    let operations = state.launch_operations.clone();
+    let status = tauri::async_runtime::spawn_blocking(move || {
+        queue.request_alongside(&name, operations.as_ref())
+    })
+    .await
+    .map_err(|_| "launch_unavailable".to_string())?
+    .map_err(str::to_string)?;
+    emit_launch_status(&app, &status);
+    Ok(status)
 }
 
 /// Bring the running Claude for `name` to the front (all its windows). Resolves
@@ -426,9 +456,11 @@ async fn launch_additional_window(
 /// via the public `NSRunningApplication` API (no code injection). `Ok(false)` when
 /// no Claude is running for that environment: the "前面に表示" button only appears
 /// while it is in use, so this is a rare race and the UI just refreshes the list.
-/// Synchronous so it runs on the main thread, where AppKit activation belongs.
+/// Synchronous for this immediate user action. NSRunningApplication itself is
+/// thread-safe; queued activation uses the same API from its worker.
 #[tauri::command]
 fn activate_environment(name: String, state: State<'_, AppState>) -> Result<bool, String> {
+    ensure_no_pending_launch(&state)?;
     let processes = state
         .provider
         .running_desktop_processes()
@@ -519,6 +551,7 @@ fn relaunch_envs(state: &AppState) -> Vec<csw_core::switcher::RelaunchEnv> {
 /// nothing to offer (SPECIFICATION.md §5.A 前回開いていた環境の復元).
 #[tauri::command]
 async fn get_reopen_offer(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    ensure_no_pending_launch(&state)?;
     let recorded = csw_core::session::load_reopen_set(&state.provider.app_data_dir());
     let running = running_profile_names(&state);
     let known: Vec<String> = relaunch_envs(&state).into_iter().map(|e| e.name).collect();
@@ -535,33 +568,65 @@ async fn reopen_previous_set(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<ReopenResult, String> {
+    let reservation = state.launch_queue.reserve_idle().map_err(str::to_string)?;
     let recorded = csw_core::session::load_reopen_set(&state.provider.app_data_dir());
     let running = running_profile_names(&state);
     let envs = relaunch_envs(&state);
     let plan = csw_core::switcher::plan_relaunch(&recorded, &running, &envs);
 
     let mut launched: Vec<String> = Vec::new();
+    let mut attempted: Vec<String> = Vec::new();
     let mut blocked = plan.blocked;
-    // Seat the single non-concurrent environment first: switch_to is refused
-    // while Claude runs, so it must go before any additional windows.
     if let Some(name) = &plan.active {
         let switcher = ContextSwitcher::new(state.provider.clone(), state.profile_manager.clone());
-        if switcher.switch_to(name).is_ok()
+        if matches!(
+            state.launch_operations.inspect(name),
+            Ok(DesktopState::Stopped)
+        ) && switcher.switch_to(name).is_ok()
             && let Ok(profile) = state.profile_manager.get_profile(name)
         {
-            let _ = csw_core::switcher::desktop::launch_desktop(&profile, state.provider.as_ref());
-            launched.push(name.clone());
+            attempted.push(name.clone());
+            if csw_core::switcher::desktop::launch_desktop(&profile, state.provider.as_ref())
+                .is_ok()
+            {
+                launched.push(name.clone());
+            } else {
+                blocked.push(name.clone());
+            }
         } else {
-            // A Claude may have started between planning and now, so the switch
-            // was refused: report it instead of dropping it silently.
             blocked.push(name.clone());
         }
     }
     for name in &plan.additional {
-        if let Ok(profile) = state.profile_manager.get_profile(name) {
-            let _ = csw_core::switcher::desktop::launch_desktop(&profile, state.provider.as_ref());
-            launched.push(name.clone());
+        match state.launch_operations.inspect(name) {
+            Ok(DesktopState::TargetRunning(_)) => continue,
+            Err(_) => {
+                blocked.push(name.clone());
+                continue;
+            }
+            _ => {}
         }
+        if let Ok(profile) = state.profile_manager.get_profile(name)
+            && !profile.profile.is_default
+            && profile.sharing.is_fully_isolated()
+        {
+            attempted.push(name.clone());
+            if csw_core::switcher::desktop::launch_desktop(&profile, state.provider.as_ref())
+                .is_ok()
+            {
+                launched.push(name.clone());
+            } else {
+                blocked.push(name.clone());
+            }
+        } else {
+            blocked.push(name.clone());
+        }
+    }
+    if !attempted.is_empty() {
+        let pending = reservation
+            .observe_batch(attempted)
+            .map_err(str::to_string)?;
+        emit_launch_status(&app, &pending);
     }
 
     // Keep the recorded set while anything is still blocked, so the banner can
@@ -739,6 +804,24 @@ fn update_tray_menu(app: &AppHandle) -> Result<(), String> {
         menu_items.push(Box::new(p_item) as Box<dyn tauri::menu::IsMenuItem<Wry>>);
     }
 
+    if let Ok(status) = state.launch_queue.status()
+        && status.phase == LaunchPhase::Waiting
+    {
+        let cancel = MenuItem::with_id(
+            app,
+            "cancel_pending_launch",
+            if ja {
+                "起動予約をキャンセル"
+            } else {
+                "Cancel pending launch"
+            },
+            true,
+            None::<&str>,
+        )
+        .map_err(|_| "launch_unavailable".to_string())?;
+        menu_items.push(Box::new(cancel));
+    }
+
     // 3. Footer Operations
     let sep2 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
     menu_items.push(Box::new(sep2) as Box<dyn tauri::menu::IsMenuItem<Wry>>);
@@ -809,7 +892,13 @@ fn main() {
         ProfileManager::new(provider.clone()).expect("Failed to initialize profile manager"),
     );
 
+    let launch_operations = Arc::new(DesktopLaunchOperations::new(
+        provider.clone(),
+        profile_manager.clone(),
+    ));
     let app_state = AppState {
+        launch_queue: Arc::new(LaunchQueue::default()),
+        launch_operations,
         provider,
         profile_manager,
         takeover_from: std::sync::Mutex::new(None),
@@ -843,6 +932,13 @@ fn main() {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
+                    } else if id == "cancel_pending_launch" {
+                        let state = app.state::<AppState>();
+                        if let Ok(status) = state.launch_queue.status()
+                            && let Ok(canceled) = state.launch_queue.cancel(status.request_id)
+                        {
+                            emit_launch_status(app, &canceled);
+                        }
                     } else if id == "whereami" {
                         // Resolve the frontmost app BEFORE showing the settings
                         // window: menu clicks do not change the frontmost app,
@@ -856,31 +952,49 @@ fn main() {
                         let _ = app.emit("whereami", payload);
                     } else if let Some(profile_name) = id.strip_prefix("profile_") {
                         let state = app.state::<AppState>();
-                        let switcher = ContextSwitcher::new(
-                            state.provider.clone(),
-                            state.profile_manager.clone(),
-                        );
-
-                        if let Err(e) = switcher.switch_to(profile_name) {
-                            eprintln!("Failed to switch profile: {}", e);
-                        } else {
-                            let _ = update_tray_menu(app);
-                            // Auto-launch the newly active profile, including the
-                            // default ("既存の Claude"): for default this is the
-                            // standard data dir, equivalent to a normal launch.
-                            if let Ok(profile) = state.profile_manager.get_profile(profile_name) {
-                                let _ = csw_core::switcher::desktop::launch_desktop(
-                                    &profile,
-                                    state.provider.as_ref(),
-                                );
-                            }
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
                         }
+                        let queue = state.launch_queue.clone();
+                        let operations = state.launch_operations.clone();
+                        let handle = app.clone();
+                        let target = profile_name.to_owned();
+                        std::thread::spawn(move || {
+                            match queue.request(&target, operations.as_ref()) {
+                                Ok(status) => emit_launch_status(&handle, &status),
+                                Err(error) => {
+                                    use tauri::Emitter;
+                                    let _ = handle.emit("pending-launch-error", error);
+                                }
+                            }
+                        });
                     }
                 })
                 .build(app)?;
 
             // Initial tray update
             let _ = update_tray_menu(app.handle());
+
+            // One worker serves both tray and window requests. It only observes
+            // process exit; no quit APIs, task detection or modal UI is involved.
+            let launch_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    let state = launch_handle.state::<AppState>();
+                    let Ok(before) = state.launch_queue.status() else {
+                        continue;
+                    };
+                    if let Ok(after) = state
+                        .launch_queue
+                        .advance(before.request_id, state.launch_operations.as_ref())
+                        && before != after
+                    {
+                        emit_launch_status(&launch_handle, &after);
+                    }
+                }
+            });
 
             // Keep the tray's "利用中" marker honest when Claude Desktop is started
             // or quit outside CSW. The menu is otherwise rebuilt only on explicit
@@ -994,7 +1108,9 @@ fn main() {
             inspect_profile,
             get_profile_data_map,
             reveal_profile_dir,
-            switch_profile,
+            request_environment_launch,
+            get_pending_launch,
+            cancel_pending_launch,
             set_profile_note,
             get_takeover_notice,
             dismiss_takeover_notice,
