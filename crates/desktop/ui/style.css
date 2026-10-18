@@ -1143,3 +1143,14 @@ code, .code-line { font-family: var(--font-mono); }
   .advanced-panel, .disclosure-panel { transition: none; }
   ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; }
 }
+
+/* One persistent status, including when the detail selection changes. */
+.pending-launch-banner { flex-wrap: wrap; }
+.pending-launch-copy { flex: 1 1 250px; min-width: 0; }
+.pending-launch-target { margin: 0 0 5px; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.pending-launch-banner .dmg-banner-text { margin: 0; font-size: 12px; line-height: 1.6; }
+html[lang="ja"] .pending-launch-banner .dmg-banner-text { line-height: 1.8; line-break: strict; }
+.pending-launch-banner .dmg-banner-actions { flex-wrap: wrap; }
+.pending-launch-banner button { white-space: nowrap; }
+
+.pending-launch-banner button[hidden] { display: none; }

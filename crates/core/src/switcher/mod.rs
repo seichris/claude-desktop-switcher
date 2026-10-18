@@ -1,4 +1,5 @@
 pub mod desktop;
+pub mod pending;
 pub mod shell;
 pub mod takeover;
 

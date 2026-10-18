@@ -9,6 +9,7 @@ pub struct MockPlatformProvider {
     pub app_data: PathBuf,
     /// Test knob: report Claude Desktop as running.
     desktop_running: AtomicBool,
+    launched: std::sync::Mutex<Vec<PathBuf>>,
     /// Test knob: fail process inspection instead of reporting an idle desktop.
     fail_process_inspection: AtomicBool,
     /// Test knob: make `create_symlink` fail (to exercise rollback paths).
@@ -33,6 +34,7 @@ impl MockPlatformProvider {
             cli_default,
             app_data,
             desktop_running: AtomicBool::new(false),
+            launched: std::sync::Mutex::new(Vec::new()),
             fail_process_inspection: AtomicBool::new(false),
             fail_symlink: AtomicBool::new(false),
             fail_trash: AtomicBool::new(false),
@@ -41,6 +43,17 @@ impl MockPlatformProvider {
             activated: std::sync::Mutex::new(Vec::new()),
             frontmost: std::sync::Mutex::new(crate::platform::FrontmostApp::OtherApp),
         }
+    }
+
+    pub fn set_desktop_state(&self, running: bool, processes: Vec<(u32, String)>) {
+        self.desktop_running.store(running, Ordering::SeqCst);
+        *self.running_args.lock().unwrap() =
+            processes.iter().map(|(_, args)| args.clone()).collect();
+        *self.running_processes.lock().unwrap() = processes;
+    }
+
+    pub fn launched_dirs(&self) -> Vec<PathBuf> {
+        self.launched.lock().unwrap().clone()
     }
 
     /// Builder: set what `frontmost_app` reports.
@@ -142,9 +155,13 @@ impl PlatformProvider for MockPlatformProvider {
 
     fn launch_claude_desktop(
         &self,
-        _user_data_dir: &std::path::Path,
+        user_data_dir: &std::path::Path,
         _cli_config_dir: Option<&std::path::Path>,
     ) -> Result<()> {
+        self.launched
+            .lock()
+            .unwrap()
+            .push(user_data_dir.to_path_buf());
         Ok(())
     }
 

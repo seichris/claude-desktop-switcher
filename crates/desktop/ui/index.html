@@ -109,6 +109,16 @@
         </div>
       </div>
 
+      <div class="takeover-banner pending-launch-banner" id="pendingLaunchBanner" role="status" aria-live="polite" hidden>
+        <div class="pending-launch-copy">
+          <p class="pending-launch-target" id="pendingLaunchTarget"></p>
+          <p class="dmg-banner-text" id="pendingLaunchText"></p>
+        </div>
+        <div class="dmg-banner-actions">
+          <button type="button" class="btn btn-ghost" id="btnCancelPendingLaunch" data-en="Cancel pending launch">起動予約をキャンセル</button>
+        </div>
+      </div>
+
       <!-- Update-takeover notice: text and the switch button are built at
            runtime with T() because they embed the environment name. -->
       <div class="takeover-banner" id="takeoverBanner" hidden>
@@ -181,7 +191,7 @@
                     <span class="firstrun-icon"><svg class="icon"><use href="#i-switch"/></svg></span>
                     <div>
                       <p class="firstrun-head">環境を切り替えて使えます</p>
-                      <p class="firstrun-body">「利用中」は、いまClaudeが起動している環境です。Claudeを終了すれば「利用中」は外れ、その環境はまた「この環境を起動」から開き直せます。設定を共有する環境は衝突を防ぐため一度に1つずつ開くので、別の環境を開くときは先に起動中のClaudeを終了します。「すべて分ける」で作った環境は何も共有しないので、起動中のClaudeを終了せず、新しいウィンドウで並べて開けます。</p>
+                      <p class="firstrun-body">「利用中」は、いまClaudeが起動している環境です。Claudeを終了すれば「利用中」は外れ、その環境はまた「この環境を起動」から開き直せます。設定を共有する環境は衝突を防ぐため一度に1つずつ開きます。次の環境を選んで起動を押すと、Claudeを手動ですべて終了するまで待ってから開きます。「すべて分ける」で作った環境は何も共有しないので、起動中のClaudeを終了せず、新しいウィンドウで並べて開けます。</p>
                     </div>
                   </div>
                   <div class="firstrun-row">
