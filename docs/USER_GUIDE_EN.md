@@ -16,7 +16,7 @@ Understand this one thing and nothing else is confusing.
 
 First, the account. An account is the Claude account you sign in to; your billing and usage attach to it. Each environment signs in with its own account, so the sign-in info, the device identifiers, and the desktop app settings including connectors are always separate per environment, in every mode. What changes per environment is whether you carry over your conversation history and auto-memory, and whether you carry over settings such as your global rules and skills.
 
-- **"Existing Claude" = your existing setup** (the Claude Desktop and Claude Code you already use). It is the reference point, and CSW never changes it.
+- **"Existing Claude" = your existing setup** (the Claude Desktop and Claude Code you already use). It is the reference point. Only explicitly enabling complete local Code sharing allows CSW to replace its local Code stores; its sign-in storage stays separate.
 - **Creating a new environment = deciding, item by item, what to inherit from "Existing Claude" and what to keep separate.** The counterpart of share / isolate / copy is always "Existing Claude".
   - **Share**: use the same thing as your existing Claude (changes apply to both)
   - **Isolate**: keep a new thing just for this environment (independent, empty at first)
@@ -27,7 +27,7 @@ First, the account. An account is the Claude account you sign in to; your billin
 
 ## 1. Installation & Initial Setup
 
-Your existing Claude environment (e.g., your default personal environment) is preserved as-is.
+The standard setup preserves Existing Claude. Optional complete local Code sharing, described below, additionally synchronizes its Code stores while preserving separate sign-ins.
 
 ### Step 1: Install the Application
 1. Download the latest `.dmg` file from the [Releases](https://github.com/matsumotory/claude-desktop-switcher/releases/latest) page.
@@ -134,7 +134,7 @@ These are records for an environment, not verification of the account currently 
 ## 3. What you should know: safety and zero impact
 
 * **It's safe even if you forget to launch the app**
-  Claude Desktop Switcher never silently alters system environment variables. If you launch Claude normally without using this app, it acts as your Existing Claude 100% of the time. Your existing setup cannot be broken.
+  Claude Desktop Switcher does not alter system environment variables. Launching Claude normally uses Existing Claude. If complete local Code sharing has been enabled, that environment retains the Code stores from its most recent synchronization; launching outside CSW does not run another synchronization.
 * **How to tell which account you are using, to avoid the wrong one**
   If you are unsure which environment your terminal is using, run `echo $CLAUDE_CONFIG_DIR` in that tab. A path ending in `.context-switcher-claude/profiles/<env-name>/cli-data` means that environment; empty output or a path ending in `.claude` means Existing Claude. `csw status` shows the environment you last launched from the settings window or the menu bar icon, or last chose with `csw switch`. "Launch alongside" does not change it, and it is not necessarily the one in that tab. When you have several environments open side by side in the desktop app and cannot tell which window is which, select that environment in CSW and press "Bring to front" to raise its Claude. macOS groups multiple windows of the same app under a single Dock icon, so you cannot tell them apart by the Dock icon; CSW raises the one you name instead.
 * **Pick the accent color**
@@ -144,7 +144,7 @@ These are records for an environment, not verification of the account currently 
 * **Everything the app reads and writes is documented**
   [Privacy and Transparency](PRIVACY_EN.md) lists every path this app reads, every path it writes, and everything it never touches, together with the steps to verify on your own Mac that it makes no network requests. We publish the verification steps, not just the claims.
 * **Deleting an environment by mistake is recoverable**
-  Deleting an environment simply moves its folder to the macOS Trash. Until you empty the Trash, nothing is lost, including the sign-in state and share links. To bring it back, move the folder from the Trash into `~/.context-switcher-claude/profiles/`; when you return to the CSW window, it reappears in the list as is. If you want it gone immediately, choose "Delete permanently" in the confirmation (it skips the Trash and cannot be undone).
+  If an environment participates in complete local Code sharing, first disable that synchronization with `csw unshare-code`. Deleting an environment moves its folder to the macOS Trash. Until you empty the Trash, nothing is lost, including the sign-in state and share links. To bring it back, move the folder from the Trash into `~/.context-switcher-claude/profiles/`; when you return to the CSW window, it reappears in the list as is. If you want it gone immediately, choose "Delete permanently" in the confirmation (it skips the Trash and cannot be undone).
 * **See where this environment's data lives and how much there is**
   Open "Location of this environment's data" in the detail screen to see, beyond the folder paths, how much space the environment occupies by itself, the approximate size of each folder, and a per-item breakdown. Shared items show their link target; everything else shows its approximate size and last-modified date. Only file names, sizes, and dates are read for this; contents are never opened. Each folder opens directly with "Show in Finder", which also makes backups straightforward.
 * **Check anytime that the isolation still holds**
@@ -152,13 +152,23 @@ These are records for an environment, not verification of the account currently 
 
 ---
 
+### Complete local Code sharing in this fork
+
+[Build this fork's app and CLI](LOCAL_BUILD.md#build-and-use) and install both local outputs; upstream downloads do not contain these commands. With this fork's `csw` command installed, environments that already share transcripts, project memory and input history can also share complete Desktop Code stores. Quit every Claude Desktop instance, then run `csw share-code --source default --replace Research Development`, replacing the example names with your environment names. Each environment must have opened Code once and have one account/workspace directory. The source's complete stores replace the destinations after every original store has been backed up. Saved Code permissions, connector references, scheduled-task definitions, archive/deletion records and worktree leases are included.
+
+After setup, launch environments normally in Switcher. Existing Desktop logins stay separate; no Claude Code CLI login step is added. Before launching a participant, Switcher compares the complete stores with the previous synchronization and carries forward the one that changed. If several changed independently, it stops instead of overwriting a conflict. This takes effect through Claude's normal launch, rather than live updates in another running window. Use one participant at a time. Cloud Projects, cloud Chat conversations and Web-side custom groups are outside this feature. Backups and their locations manifest remain under `~/.context-switcher-claude/native-code-backups/`.
+
+To stop future synchronization, quit every Claude Desktop instance and run `csw unshare-code`. This preserves the current local data and sign-ins; it does not restore the pre-sharing stores or unlink the separately shared transcripts, memory or input history. A participating environment cannot be deleted until this synchronization is disabled.
+
+If Claude startup cannot be confirmed, a saved launch reservation blocks further synchronization. Quit every Claude Desktop instance, run `csw unshare-code`, then configure sharing again with `csw share-code`, choosing the environment whose data you want as `--source` and listing the other participants with `--replace`. This takes another backup before overwriting. An interrupted copy is completed from its recorded source backup before sharing is disabled; every overwritten original remains backed up.
+
 ## 4. FAQ
 
 **Q. Share / isolate: relative to what?**
 Always relative to Existing Claude, the setup you already use. Using the same thing as your existing Claude is called share, and keeping a new one just for this environment is called isolate; you choose one per item in a new environment.
 
 **Q. What is "Existing Claude"?**
-It is your existing Claude Desktop and Claude Code setup. CSW only displays it and uses it as the reference; it never changes or deletes your settings, history, or account sign-in. In the app it appears as the first row of the environment list.
+It is your existing Claude Desktop and Claude Code setup. CSW uses it as the reference. If you explicitly enable complete local Code sharing, its Code stores are synchronized with the participants. Its sign-in storage is excluded. In the app it appears as the first row of the environment list.
 
 **Q. Do I need to create a new environment just to use the same account?**
 No. If you only want to keep using the same account, you do not need a new environment; launch Claude as usual and "Existing Claude" is used directly. CSW helps when you want additional, independent environments for different accounts or projects.

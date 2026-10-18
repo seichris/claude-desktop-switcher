@@ -46,11 +46,11 @@ const EN = {
   // Empty / onboarding
   'はじめまして': 'Welcome',
   '環境を分けて、混ぜない。': 'Separate environments. Never mixed.',
-  '既存のClaudeはそのまま。そこを基準に、何を引き継ぎ何を分けるかを決めて、新しい環境を作ります。':
-    'Your existing Claude stays untouched. Starting from it, decide what to carry over and what to separate, then create a new environment.',
-  'いまの環境はそのまま残ります': 'Your current setup stays intact',
-  'あなたが普段使っているClaudeデスクトップアプリとClaude Codeの環境は「既存のClaude」として保護され、設定・履歴・ログインは変更されません。':
-    'Your everyday Claude Desktop App and Claude Code setup is protected as "Existing Claude"; its settings, history, and sign-in are never changed.',
+  '既存のClaudeを基準に、引き継ぐものと分けるものを選びます。ローカルCode全体の共有は、専用コマンドで有効にできます。':
+    'Choose what to carry over or separate from Existing Claude. Enable complete local Code sharing separately with its setup command.',
+  'ログインは環境ごとに保持します': 'Sign-ins stay with each environment',
+  '普段使っている環境は「既存のClaude」として保持します。ローカルCode全体の共有を明示的に有効にした場合だけCodeストアを同期し、ログインは変更しません。':
+    'Your everyday setup remains Existing Claude. Only explicitly enabling complete local Code sharing synchronizes its Code stores; sign-ins stay unchanged.',
   '環境を切り替えて使えます': 'Switch between environments',
   '「利用中」は、いまClaudeが起動している環境です。Claudeを終了すれば「利用中」は外れ、その環境はまた「この環境を起動」から開き直せます。設定を共有する環境は衝突を防ぐため一度に1つずつ開くので、別の環境を開くときは先に起動中のClaudeを終了します。「すべて分ける」で作った環境は何も共有しないので、起動中のClaudeを終了せず、新しいウィンドウで並べて開けます。':
     '"In use" marks the environment Claude is currently running for. Quit Claude and it clears, so you can reopen that environment from "Launch this environment". Environments that share settings open one at a time to avoid conflicts, so quit the running Claude before opening another. An environment set to "separate everything" shares nothing, so you can open it in a new window alongside a running Claude, without quitting.',
@@ -84,8 +84,8 @@ const EN = {
   'ターミナルでClaude Codeを使う': 'Use Claude Code in the terminal',
   'CSWから開いたアプリの中で使うターミナルは、最初からこの環境です。コマンドは要りません。自分で別に開いたiTerm2などのターミナルで対象の環境に揃えるには、環境名を渡して次を実行します。この設定はそのタブだけに効き、普段の環境には影響しません。':
     "A terminal opened inside the app you launched from CSW is already in this environment, so no command is needed. To switch a terminal you opened yourself, such as iTerm2, to a target environment, pass the environment name and run the command below. It applies to that tab only and never affects your usual environment.",
-  'あなた自身のClaudeデスクトップアプリとClaude Codeの環境です。CSWはここを表示しているだけで、設定・履歴・ログインを変更したり削除したりしません。':
-    'This is your own Claude Desktop App and Claude Code setup. CSW only displays it; it never changes or deletes your settings, history, or sign-in.',
+  'あなた自身のClaudeデスクトップアプリとClaude Codeの環境です。ローカルCode全体の共有を明示的に有効にした場合だけCodeストアを同期し、ログインは変更しません。':
+    'This is your own Claude Desktop App and Claude Code setup. Only explicitly enabling complete local Code sharing synchronizes its Code stores; sign-ins stay unchanged.',
   // Buttons / actions
   '複製': 'Duplicate', '削除': 'Delete',
   'この環境の複製': 'Duplicate this environment',
@@ -151,8 +151,8 @@ const EN = {
   'プライバシー': 'Privacy',
   'CSWはインターネット通信も、利用状況の送信も行いません。パスワードを保管するmacOSのキーチェーンにも触れず、すべて手元のフォルダと設定の操作だけで動きます。': 'CSW makes no network requests and sends no usage data. It never touches the macOS Keychain that stores your passwords; it works only with local folders and settings.',
   '何を読み書きするか': 'What it reads and writes',
-  '環境のデータの書き込み先は、CSW専用のフォルダ「~/.context-switcher-claude/」の中だけです。読む場所・書く場所の詳しい一覧と、通信していないことをご自身のMacで確かめる手順は、プライバシーと透明性の文書で公開しています。':
-    'Environment data is written only inside CSW\'s own folder, ~/.context-switcher-claude/. The full lists of what it reads and writes, and the steps to verify on your own Mac that it makes no network requests, are published in the Privacy and Transparency document.',
+  '通常はCSW専用のフォルダに書き込みます。ローカルCode全体の共有を明示的に有効にすると、既存のClaudeを含む参加環境のCodeストアも置き換えます。サインイン情報は対象外です。読み書きの範囲と通信しないことの確かめ方は、プライバシーと透明性の文書で公開しています。':
+    'Writes normally stay in CSW\'s own folder. Explicitly enabling complete local Code sharing also replaces Code stores in participating environments, including Existing Claude. Sign-in storage is excluded. Privacy and Transparency documents the read/write scope and how to verify the absence of network requests.',
   '確かめ方を見る': 'See how to verify',
   '非公式プロジェクト': 'Unofficial project',
   // Isolation check (csw doctor)
@@ -732,10 +732,10 @@ async function showDetail(name) {
     // setup?"). The paths are collapsed; the "all 11 shared" line is dropped as
     // self-evident for the baseline.
     nodes.push(section('', [
-      h('div', { class: 'note-card', dataset: { en: 'This is your own Claude Desktop App and Claude Code setup. CSW only displays it; it never changes or deletes your settings, history, or sign-in.' } },
+      h('div', { class: 'note-card', dataset: { en: 'This is your own Claude Desktop App and Claude Code setup. Only explicitly enabling complete local Code sharing synchronizes its Code stores; sign-ins stay unchanged.' } },
         'あなたが普段使っている', h('strong', { text: 'Claudeデスクトップアプリ' }), 'と',
         h('strong', { text: 'Claude Code' }),
-        'の環境です。CSWはここを表示しているだけで、設定・履歴・ログインを変更したり削除したりしません。'),
+        'の環境です。ローカルCode全体の共有を明示的に有効にした場合だけCodeストアを同期し、ログインは変更しません。'),
     ]));
     nodes.push(pathsSection(d, true));
   } else {
@@ -1013,8 +1013,8 @@ function signpostSection(d) {
     }));
   }
   card.append(h('p', {
-    text: T('これまでのチャットや設定は、既存のClaudeに無傷で残っています。いつでも戻れます。',
-      'Your existing chats and settings are untouched in Existing Claude. You can always go back.'),
+    text: T('既存のClaudeのクラウドChatとログインは維持します。ローカルCode全体の共有を有効にした場合は、Codeストアが同期されます。',
+      'Existing Claude keeps its cloud Chat history and sign-in. When complete local Code sharing is enabled, its Code stores are synchronized.'),
   }));
   if (d.sharing && d.sharing.cli_project_memory !== 'isolate') {
     // Shared or copied: either way the local Claude Code history is here,
@@ -1938,7 +1938,7 @@ const DISCLAIMER = [
   ['無保証', '本ソフトウェアはMITライセンスのもとで、そのままの状態で提供されます。動作や品質について、いかなる保証もありません。'],
   ['自己責任でのご利用', 'ご利用は自己責任でお願いします。データの損失や不具合などについて、作者は責任を負いません。大切なデータは、お試しになる前にバックアップしておくことをおすすめします。'],
   ['プライバシー', 'CSWはインターネット通信も、利用状況の送信も行いません。パスワードを保管するmacOSのキーチェーンにも触れず、すべて手元のフォルダと設定の操作だけで動きます。'],
-  ['何を読み書きするか', '環境のデータの書き込み先は、CSW専用のフォルダ「~/.context-switcher-claude/」の中だけです。読む場所・書く場所の詳しい一覧と、通信していないことをご自身のMacで確かめる手順は、プライバシーと透明性の文書で公開しています。'],
+  ['何を読み書きするか', '通常はCSW専用のフォルダに書き込みます。ローカルCode全体の共有を明示的に有効にすると、既存のClaudeを含む参加環境のCodeストアも置き換えます。サインイン情報は対象外です。読み書きの範囲と通信しないことの確かめ方は、プライバシーと透明性の文書で公開しています。'],
   ['非公式プロジェクト', '本プロジェクトは非公式のコミュニティ製で、Anthropic社とは関係ありません。「Claude」はAnthropicの商標です。'],
 ];
 

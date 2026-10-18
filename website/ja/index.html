@@ -80,7 +80,7 @@
                             <img src="../assets/logo.png" class="menu-bar-logo" alt="CSW Icon">
                         </div>
                     </div>
-                    <img src="../assets/ja_hero.png?v=0.24.6" width="1520" height="996" alt="Claude Desktop Switcher設定UI" class="hero-image">
+                    <img src="../assets/ja_hero.png?v=0.24.6-local.5" width="1520" height="996" alt="Claude Desktop Switcher設定UI" class="hero-image">
                 </div>
             </div>
         </section>
@@ -115,20 +115,20 @@
         <section id="screens" class="screens container fade-in">
             <div class="screens-header">
                 <h2>実際の画面。</h2>
-                <p>環境管理はすべて1つの設定ウインドウで完結します。分離・共有の環境を作り、各環境が何を共有しているかを確認し、その場で切り替えられます。</p>
+                <p>通常の環境管理は1つの設定ウインドウで操作できます。分離・共有の環境を作り、各環境が何を共有しているかを確認し、その場で切り替えられます。</p>
             </div>
             <div class="screens-bento">
                 <figure class="screen-card fade-in delay-1">
-                    <img src="../assets/ja_screen_overview.png?v=0.24.6" width="1520" height="3460" alt="各環境のパスと項目別の共有/分離マトリクスを表示したCSW設定画面" loading="lazy">
+                    <img src="../assets/ja_screen_overview.png?v=0.24.6-local.5" width="1520" height="3460" alt="各環境のパスと項目別の共有/分離マトリクスを表示したCSW設定画面" loading="lazy">
                     <figcaption>各環境は専用のデータディレクトリを持ちます。各項目を既存環境から引き継ぐか分けるかを選べ、アカウントのサインイン情報は常に分離されます。</figcaption>
                 </figure>
                 <figure class="screen-card fade-in delay-2">
-                    <img src="../assets/ja_screen_create.png?v=0.24.6" width="1520" height="2200" alt="「アカウントだけ分ける」「会話とメモリも分ける」「すべて分ける」を選べる環境作成画面" loading="lazy">
+                    <img src="../assets/ja_screen_create.png?v=0.24.6-local.5" width="1520" height="2200" alt="「アカウントだけ分ける」「会話とメモリも分ける」「すべて分ける」を選べる環境作成画面" loading="lazy">
                     <figcaption>環境は数秒で作成できます。アカウントだけ・会話とメモリも・すべて、の3つから引き継ぐ範囲を選びます。</figcaption>
                 </figure>
                 <figure class="screen-card fade-in delay-2">
-                    <img src="../assets/ja_screen_onboarding.png?v=0.24.6" width="1520" height="1914" alt="既存環境が保持されることを説明する初回オンボーディング" loading="lazy">
-                    <figcaption>初回だけ表示される短い案内です。現在の環境は「既存のClaude」として保持され、変更されることはありません。</figcaption>
+                    <img src="../assets/ja_screen_onboarding.png?v=0.24.6-local.5" width="1520" height="1914" alt="既存環境が保持されることを説明する初回オンボーディング" loading="lazy">
+                    <figcaption>初回だけ表示される短い案内です。現在の環境は「既存のClaude」として保持し、ログインを分離します。ローカルCode全体の共有には明示的な追加設定が必要です。</figcaption>
                 </figure>
             </div>
         </section>
@@ -255,7 +255,11 @@
                 </div>
                 <div class="faq-item">
                     <p class="faq-q">「既存のClaude」とは？</p>
-                    <p class="faq-a">普段お使いの既存のClaudeデスクトップアプリとClaude Codeの環境です。CSWはこれを基準にするだけで、設定・会話履歴・アカウントのサインイン情報を変更も削除もしません。</p>
+                    <p class="faq-a">普段お使いの既存のClaudeデスクトップアプリとClaude Codeの環境です。CSWはこれを基準にします。このフォークでは、ローカルCode全体の共有を明示的に有効にした場合だけCodeストアを置き換え、サインイン情報は対象外にします。</p>
+                </div>
+                <div class="faq-item">
+                    <p class="faq-q">このフォークでローカルCode全体を共有できますか？</p>
+                    <p class="faq-a">明示的な追加設定により、Desktopのログインを分離したまま、Codeサイドバーのストア全体、ワークツリーの管理情報、保存済みのプリセットを同期できます。全Claudeの終了とバックアップ後、参加環境の起動前に同期します。クラウドのChatとProjectsは対象外で、Claude Code CLIへのログインは追加しません。上流の配布版ではなく、ローカルのアプリとCLIが必要です。<code>csw unshare-code</code>で以後の同期を止めても、現在のデータとログインは維持します。<a href="https://github.com/seichris/claude-desktop-switcher/blob/main/docs/USER_GUIDE.md#このフォークでローカルcode全体を共有する" target="_blank" rel="noopener">ローカルCode共有のガイド</a>を参照してください。</p>
                 </div>
                 <div class="faq-item">
                     <p class="faq-q">既存の設定を別の場所にカスタマイズしていても使えますか？</p>

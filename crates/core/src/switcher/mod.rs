@@ -57,6 +57,11 @@ impl ContextSwitcher {
             return Err(CswError::DesktopRunning);
         }
 
+        crate::native_code::before_switch(
+            self.profile_manager.as_ref(),
+            self.provider.as_ref(),
+            profile_name,
+        )?;
         self.profile_manager.switch_to(profile_name)?;
         Ok(())
     }
