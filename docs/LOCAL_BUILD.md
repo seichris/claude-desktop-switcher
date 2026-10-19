@@ -2,7 +2,7 @@
 
 This fork was reviewed against upstream version 0.24.6 at
 `5892992dead8f9596c5291d87b0259d0b494f650`. The local build has version
-`0.24.6-local.8` and bundle identifier `com.seichris.claude-desktop-switcher`.
+`0.24.6-local.9` and bundle identifier `com.seichris.claude-desktop-switcher`.
 
 The source review found no explicit runtime credential exfiltration, Keychain
 access, telemetry or automatic updater. This is limited source evidence, not a
@@ -36,7 +36,7 @@ Claude accounts still run as the same macOS user.
   credentials, sign in, make network requests or modify environment data.
   See the [usage guide](USER_GUIDE_EN.md#checking-saved-claude-usage) and
   [read scope](PRIVACY_EN.md#local-files-read-for-claude-usage).
-- Add opt-in complete local Desktop Code sharing with `csw share-code`, using existing Desktop sign-ins and no Claude Code CLI login. It copies complete Code sidebar, worktree and preset records only while Claude is stopped, backs up every participant, and refuses independent conflicting changes. `csw unshare-code` disables future synchronization without removing current data or sign-ins. Participating environments cannot be deleted until sharing is disabled. See the [sharing guide](USER_GUIDE_EN.md#complete-local-code-sharing-in-this-fork).
+- Add opt-in complete local Desktop Code sharing with `csw share-code`, using existing Desktop sign-ins and no Claude Code CLI login. It copies complete Code sidebar, worktree and preset records only while Claude is stopped, backs up every participant, and hands off the complete store from the last durably confirmed participating launch. Focus/GC housekeeping does not create a content conflict; known stale destinations are reseeded, while unknown external edits stop the handoff. `csw unshare-code` disables future synchronization without removing current data or sign-ins. Participating environments cannot be deleted until sharing is disabled. See the [sharing guide](USER_GUIDE_EN.md#complete-local-code-sharing-in-this-fork).
 
 - Queue a Desktop launch in memory when another Claude Desktop instance is running. Wait for the user to finish work and quit every Desktop instance normally, then use the existing stopped-state synchronization and launch path. Waiting can be canceled; restarting CSW clears the reservation. If process inspection is temporarily unavailable while waiting, keep the reservation and recheck without launching until process state is verified. Never retry a submitted launch. The queue observes process metadata only and never requests quit, detects task completion, reads credentials or needs Accessibility permission. The CLI keeps its strict running-app refusal. See [the manual-quit guide](USER_GUIDE_EN.md#launch-after-you-quit-claude).
 
@@ -69,7 +69,7 @@ Choose **Separate everything** when you want independent Code histories. Existin
 Do not use Duplicate to add a different account: it intentionally copies Desktop
 sign-in state. Quit every Claude Desktop instance before maintenance. External
 Claude Code sessions can also write profile files; close those before maintenance.
-These checks are not a transactional snapshot or protection against malicious
+The stopped-state transaction uses backups, an operation lock, atomic replacement and a recoverable journal; source/destination identities and bytes are rechecked before replacement. These checks are not protection against malicious
 same-user filesystem changes racing an operation.
 
 ## Dependency check on 2026-10-15

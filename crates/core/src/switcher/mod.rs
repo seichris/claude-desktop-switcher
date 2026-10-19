@@ -54,7 +54,11 @@ impl ContextSwitcher {
 
         // Refuse to switch while Claude Desktop is running to avoid cache
         // write-back and symlink data races.
-        if self.provider.is_claude_desktop_running()? {
+        if self
+            .provider
+            .is_claude_desktop_running()
+            .map_err(|_| CswError::ProcessInspection)?
+        {
             return Err(CswError::DesktopRunning);
         }
 

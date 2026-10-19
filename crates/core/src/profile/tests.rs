@@ -2155,13 +2155,13 @@ fn launch_desktop_stamps_last_launch_but_never_for_default() {
         .create_profile("runner", SharingConfig::default(), None)
         .unwrap();
     let runner = manager.get_profile("runner").unwrap();
-    crate::switcher::desktop::launch_desktop(&runner, provider.as_ref()).unwrap();
+    crate::switcher::desktop::launch_desktop(&runner, provider.as_ref(), &manager).unwrap();
     assert!(manager.last_launched_at("runner").unwrap().is_some());
 
     // Zero-impact: launching the default environment must not drop a
     // state.toml next to the user's real Claude data directory.
     let default = manager.get_profile("default").unwrap();
-    crate::switcher::desktop::launch_desktop(&default, provider.as_ref()).unwrap();
+    crate::switcher::desktop::launch_desktop(&default, provider.as_ref(), &manager).unwrap();
     let default_dir = provider.claude_desktop_default_dir();
     let real_parent = default_dir.parent().unwrap();
     assert!(!real_parent.join("state.toml").exists());

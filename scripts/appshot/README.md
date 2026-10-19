@@ -14,7 +14,7 @@ node scripts/appshot/gen-screenshots.mjs
 ```
 
 - 必要: Google Chrome、Node 21 以降 (global `WebSocket` / `fetch`)。
-- 出力 (日英14枚): 日本語は `ja_screen_onboarding.png` / `ja_screen_overview.png` / `ja_screen_create.png` / `ja_screen_usage.png` / `ja_screen_pending_launch.png` / `ja_screen_pending_recheck.png` / `ja_hero.png`、英語は `screen_onboarding.png` / `screen_overview.png` / `screen_create.png` / `screen_usage.png` / `screen_pending_launch.png` / `screen_pending_recheck.png` / `hero.png`。すべて `website/assets/` に書き出す。
+- 出力 (日英16枚): 日本語は `ja_screen_onboarding.png` / `ja_screen_overview.png` / `ja_screen_create.png` / `ja_screen_usage.png` / `ja_screen_pending_launch.png` / `ja_screen_pending_recheck.png` / `ja_screen_history_conflict.png` / `ja_hero.png`、英語は `screen_onboarding.png` / `screen_overview.png` / `screen_create.png` / `screen_usage.png` / `screen_pending_launch.png` / `screen_pending_recheck.png` / `screen_history_conflict.png` / `hero.png`。すべて `website/assets/` に書き出す。
 - 手元の下見では、`CSW_APPSHOT_OUT=/tmp/csw-appshot-preview node scripts/appshot/gen-screenshots.mjs`で出力先を変える。
 
 ## 出荷する画像はmacOSランナーで撮る
@@ -25,7 +25,7 @@ node scripts/appshot/gen-screenshots.mjs
 gh workflow run appshot.yml -f branch=<PRのブランチ>
 ```
 
-ワークフローは14枚を撮り直し、差分があればbotのコミットとしてそのブランチへpushする。botがpushすると、PRのCIのrunは承認待ちで止まる。その後に空のコミットをpushして、必須チェックを走らせる。
+ワークフローは16枚を撮り直し、差分があればbotのコミットとしてそのブランチへpushする。botがpushすると、PRのCIのrunは承認待ちで止まる。その後に空のコミットをpushして、必須チェックを走らせる。
 
 手元のMacで撮った画像は、出荷する画像に使わない。2026年10月に手元のMacのChrome 154で撮ると、ChromeはコードをOsaka-Monoで描いた。UIはコードの書体に4つの候補を指定している。このChromeは、`ui-monospace`と`SF Mono`と`JetBrains Mono`を解決できず、最後の総称の`monospace`に落ちた。そのため手元の画像では、ランナーの画像よりコードの字が小さく見え、字の形も違う。手元で撮るのは、変更が画面にどう写るかを下見するときだけにする。
 
@@ -51,3 +51,5 @@ UI は OS/ブラウザのロケールで日英を判定し、撮影時は `?lang
 検証用、英語=Work/Research/Testing) を返すので、各言語で自然に読める。日本語アセットは
 `ja_` を付け、英語アセットは素の名前で書き出す。`main.js` / `index.html` のユーザー可視
 文字列を変えたら本スクリプトで両言語を撮り直す。
+
+Code履歴の競合表示も日英で撮影し、競合・復元停止・プロセス検査・起動失敗の文言が区別できることをdevモックで検証する。

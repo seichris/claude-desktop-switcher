@@ -16,6 +16,11 @@ use crate::{
     profile::{Profile, ProfileManager, safe_fs},
 };
 
+mod content;
+mod launch;
+pub use launch::{LaunchGuard, ensure_confirmed_launch, finish_launch, launch_guard};
+
+const MAX_CONFIG: usize = 1024 * 1024;
 const CONFIG: &str = "native-code.toml";
 const JOURNAL: &str = "native-code-journal.json";
 const LAUNCH: &str = "native-code-launch-pending";
@@ -25,11 +30,15 @@ const PRESETS: &str = "ccd-session-presets.json";
 const MAX_BYTES: usize = 256 * 1024 * 1024;
 const MAX_FILES: usize = 20_000;
 
-fn refused(message: &str) -> CswError {
-    CswError::Other(format!("Local Code sharing: {message}"))
+fn refused(message: &'static str) -> CswError {
+    CswError::LocalCodeSharing(message)
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+fn conflict(message: &'static str) -> CswError {
+    CswError::LocalCodeConflict(message)
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct Group {
     version: u32,
@@ -38,6 +47,30 @@ struct Group {
     source: String,
     members: Vec<String>,
     fingerprints: BTreeMap<String, String>,
+    #[serde(default)]
+    content_fingerprints: BTreeMap<String, String>,
+    #[serde(default)]
+    known_content: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    identities: BTreeMap<String, Identity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_launch: Option<ConfirmedLaunch>,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct Identity {
+    desktop: PathBuf,
+    bucket: PathBuf,
+    cli: PathBuf,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct ConfirmedLaunch {
+    token: String,
+    name: String,
+    identity: Identity,
 }
 
 struct Location {
@@ -45,6 +78,7 @@ struct Location {
     desktop: PathBuf,
     bucket: PathBuf,
     account: String,
+    cli: PathBuf,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -67,57 +101,21 @@ struct Store {
 }
 
 fn stopped(provider: &dyn PlatformProvider) -> Result<()> {
-    if provider.is_claude_desktop_running()? || !provider.running_desktop_args()?.is_empty() {
+    if provider
+        .is_claude_desktop_running()
+        .map_err(|_| CswError::ProcessInspection)?
+        || !provider
+            .running_desktop_args()
+            .map_err(|_| CswError::ProcessInspection)?
+            .is_empty()
+    {
         return Err(CswError::DesktopRunning);
     }
     Ok(())
 }
 
 fn no_pending_launch(provider: &dyn PlatformProvider) -> Result<()> {
-    match fs::symlink_metadata(provider.app_data_dir().join(LAUNCH)) {
-        Ok(_) => Err(refused(
-            "a previous launch was not observed; quit Claude and use csw unshare-code before configuring sharing again",
-        )),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.into()),
-    }
-}
-
-/// Serialize CSW launches against sharing, including asynchronous app startup.
-/// The durable reservation fails closed if this process exits during startup.
-pub fn launch_guard(provider: &dyn PlatformProvider, name: &str) -> Result<Option<File>> {
-    if load(provider)?.is_none() && !provider.app_data_dir().join(JOURNAL).try_exists()? {
-        return Ok(None);
-    }
-    let guard = lock(provider)?;
-    no_pending_launch(provider)?;
-    if is_shared(provider, name)? {
-        stopped(provider)?;
-    }
-    write_private(
-        &provider.app_data_dir().join(LAUNCH),
-        b"startup not yet observed\n",
-    )?;
-    Ok(Some(guard))
-}
-
-/// Called while the launch guard is held. Never clear a reservation merely
-/// because a startup timeout elapsed: the asynchronous launch could still run.
-pub fn finish_launch(provider: &dyn PlatformProvider, launched: bool) -> Result<()> {
-    if launched {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while !provider.is_claude_desktop_running()? && provider.running_desktop_args()?.is_empty()
-        {
-            if std::time::Instant::now() >= deadline {
-                return Err(refused(
-                    "Claude startup was not observed; sharing remains blocked until csw unshare-code",
-                ));
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-    }
-    fs::remove_file(provider.app_data_dir().join(LAUNCH))?;
-    sync_directory(&provider.app_data_dir())
+    launch::no_pending_launch(provider)
 }
 
 fn lock(provider: &dyn PlatformProvider) -> Result<File> {
@@ -129,9 +127,22 @@ fn lock(provider: &dyn PlatformProvider) -> Result<File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(refused("invalid operation lock"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.nlink() != 1 {
+            return Err(refused("invalid operation lock"));
+        }
+    }
     file.try_lock()
         .map_err(|_| refused("another synchronization is in progress"))?;
     Ok(file)
@@ -165,6 +176,9 @@ fn directories(path: &Path) -> Result<Vec<PathBuf>> {
                 "the account/workspace directory layout is unsupported",
             ));
         }
+        if result.len() >= 64 {
+            return Err(refused("too many account/workspace directories"));
+        }
         result.push(entry.path());
     }
     Ok(result)
@@ -190,6 +204,7 @@ fn locate(profile: &Profile) -> Result<Location> {
     Ok(Location {
         name: profile.profile.name.clone(),
         desktop: desktop.clone(),
+        cli: profile.isolation.cli_config_dir.clone(),
         bucket,
         account: account
             .file_name()
@@ -200,7 +215,7 @@ fn locate(profile: &Profile) -> Result<Location> {
 }
 
 fn locations(manager: &ProfileManager, group: &Group) -> Result<Vec<Location>> {
-    if group.version != 1 || group.members.is_empty() || group.members.len() > 64 {
+    if ![1, 2].contains(&group.version) || group.members.is_empty() || group.members.len() > 64 {
         return Err(refused("unsupported sharing configuration"));
     }
     let source = manager.get_profile(&group.source)?;
@@ -241,9 +256,228 @@ fn locations(manager: &ProfileManager, group: &Group) -> Result<Vec<Location>> {
                 "participants must already share the same local Code transcripts, memory and input history",
             ));
         }
-        result.push(locate(&profile)?);
+        let place = locate(&profile)?;
+        if group.version == 2 && group.identities.get(&name) != Some(&place.identity()) {
+            return Err(refused("a participating environment identity changed"));
+        }
+        if result
+            .iter()
+            .any(|p: &Location| p.desktop == place.desktop || p.bucket == place.bucket)
+        {
+            return Err(refused("participants must have distinct local Code stores"));
+        }
+        result.push(place);
     }
     Ok(result)
+}
+
+impl Location {
+    fn validate_paths(&self) -> Result<()> {
+        safe_fs::reject_symlink(&self.desktop)?;
+        let relative = self
+            .bucket
+            .strip_prefix(&self.desktop)
+            .map_err(|_| refused("a Code bucket escapes its environment"))?;
+        let mut checked = self.desktop.clone();
+        for component in relative.components() {
+            if !matches!(component, std::path::Component::Normal(_)) {
+                return Err(refused("invalid Code bucket path"));
+            }
+            checked.push(component);
+            safe_fs::reject_symlink(&checked)?;
+        }
+        Ok(())
+    }
+    fn identity(&self) -> Identity {
+        Identity {
+            desktop: self.desktop.clone(),
+            bucket: self.bucket.clone(),
+            cli: self.cli.clone(),
+        }
+    }
+}
+
+fn valid_tag(tag: &str) -> bool {
+    !tag.is_empty() && tag.len() <= 100 && tag.bytes().all(|b| b.is_ascii_digit() || b == b'-')
+}
+
+fn backup_store(backup: &Path, name: &str, place: &Location) -> Result<Store> {
+    safe_fs::reject_symlink(backup)?;
+    let path = backup.join(name);
+    safe_fs::reject_symlink(&path)?;
+    Store::read(&Location {
+        name: place.name.clone(),
+        desktop: path.clone(),
+        bucket: path.join("bucket"),
+        cli: place.cli.clone(),
+        account: place.account.clone(),
+    })
+}
+
+fn bounded_stores(
+    stores: impl IntoIterator<Item = Result<Store>>,
+    byte_limit: usize,
+) -> Result<Vec<Store>> {
+    let mut total = 0usize;
+    let mut entries = 0usize;
+    let mut result = Vec::new();
+    for store in stores {
+        let store = store?;
+        total = total.saturating_add(store.byte_len());
+        entries = entries.saturating_add(store.files.len());
+        if total > byte_limit || entries > MAX_FILES {
+            return Err(refused("sharing group exceeds its size or file limit"));
+        }
+        result.push(store);
+    }
+    Ok(result)
+}
+
+fn remap_stores(source: &Store, from: &str, places: &[Location]) -> Result<Vec<Store>> {
+    remap_stores_with_limit(source, from, places, MAX_BYTES)
+}
+
+fn remap_stores_with_limit(
+    source: &Store,
+    from: &str,
+    places: &[Location],
+    byte_limit: usize,
+) -> Result<Vec<Store>> {
+    // Preflight bounds clone allocation even for an invalid legacy snapshot.
+    if source.byte_len().saturating_mul(places.len()) > byte_limit
+        || source.files.len().saturating_mul(places.len()) > MAX_FILES
+    {
+        return Err(refused(
+            "planned sharing group exceeds its size or file limit",
+        ));
+    }
+    // Account mapping can enlarge presets. Check actual sizes incrementally,
+    // before making further copies or writing any transaction data.
+    bounded_stores(
+        places.iter().map(|p| source.for_account(from, &p.account)),
+        byte_limit,
+    )
+}
+
+/// Reconstruct a legacy generation only from a source snapshot whose remapped
+/// complete bytes match every saved fingerprint. Never trust backup timestamps.
+fn legacy_baselines(
+    provider: &dyn PlatformProvider,
+    group: &Group,
+    places: &[Location],
+) -> Result<Vec<Store>> {
+    if !valid_tag(&group.generation) {
+        return Err(refused(
+            "legacy sharing baseline is unavailable; choose an explicit source",
+        ));
+    }
+    let root = provider.app_data_dir().join("native-code-backups");
+    safe_fs::reject_symlink(&root)?;
+    let backup = root.join(&group.generation);
+    for (i, place) in places.iter().enumerate() {
+        let source = backup_store(&backup, &i.to_string(), place)?;
+        if source.byte_len().saturating_mul(places.len()) > MAX_BYTES
+            || source.files.len().saturating_mul(places.len()) > MAX_FILES
+        {
+            continue;
+        }
+        let candidate = remap_stores(&source, &place.account, places)?;
+        if places
+            .iter()
+            .zip(&candidate)
+            .all(|(p, s)| group.fingerprints.get(&p.name) == Some(&s.fingerprint()))
+        {
+            return Ok(candidate);
+        }
+    }
+    Err(refused(
+        "legacy sharing baseline cannot be verified; choose an explicit source",
+    ))
+}
+
+fn authority_index(
+    provider: &dyn PlatformProvider,
+    group: &Group,
+    places: &[Location],
+    stores: &[Store],
+    seed: Option<&str>,
+) -> Result<usize> {
+    if let Some(name) = seed {
+        return places
+            .iter()
+            .position(|p| p.name == name)
+            .ok_or_else(|| refused("source is not a participant"));
+    }
+    if group.version == 1 {
+        let changed: Vec<_> = places
+            .iter()
+            .zip(stores)
+            .enumerate()
+            .filter(|(_, (p, s))| group.fingerprints.get(&p.name) != Some(&s.fingerprint()))
+            .map(|(i, _)| i)
+            .collect();
+        if changed.len() <= 1 {
+            return changed
+                .first()
+                .copied()
+                .or_else(|| places.iter().position(|p| p.name == group.source))
+                .ok_or_else(|| refused("missing source"));
+        }
+    }
+    let contents: Vec<_> = stores
+        .iter()
+        .map(Store::content_fingerprint)
+        .collect::<Result<_>>()?;
+    if let Some(launch) = &group.last_launch {
+        let index = places
+            .iter()
+            .position(|p| p.name == launch.name && p.identity() == launch.identity)
+            .ok_or_else(|| refused("last confirmed launch identity no longer matches"))?;
+        for (i, place) in places.iter().enumerate() {
+            if i != index
+                && group.content_fingerprints.get(&place.name) != Some(&contents[i])
+                && !group
+                    .known_content
+                    .get(&place.name)
+                    .is_some_and(|known| known.contains(&contents[i]))
+                && contents[i]
+                    != stores[index]
+                        .for_account(&places[index].account, &place.account)?
+                        .content_fingerprint()?
+            {
+                return Err(conflict(
+                    "an environment outside the last confirmed launch has unknown content changes; quit all writers and explicitly choose a source",
+                ));
+            }
+        }
+        return Ok(index);
+    }
+    let baselines = if group.version == 1 {
+        Some(legacy_baselines(provider, group, places)?)
+    } else {
+        None
+    };
+    let mut changed = Vec::new();
+    for (i, place) in places.iter().enumerate() {
+        let baseline = if let Some(stores) = &baselines {
+            Some(stores[i].content_fingerprint()?)
+        } else {
+            group.content_fingerprints.get(&place.name).cloned()
+        };
+        if baseline.as_ref() != Some(&contents[i]) {
+            changed.push(i);
+        }
+    }
+    match changed.as_slice() {
+        [] => places
+            .iter()
+            .position(|p| p.name == group.source)
+            .ok_or_else(|| refused("missing source")),
+        [one] => Ok(*one),
+        _ => Err(conflict(
+            "multiple environments changed without confirmed launch provenance; explicitly choose a source",
+        )),
+    }
 }
 
 fn read_regular(path: &Path, remaining: &mut usize) -> Result<Vec<u8>> {
@@ -288,11 +522,23 @@ fn read_regular(path: &Path, remaining: &mut usize) -> Result<Vec<u8>> {
     Ok(data)
 }
 
-fn collect(root: &Path, relative: &Path, store: &mut Store, remaining: &mut usize) -> Result<()> {
+fn collect(
+    root: &Path,
+    relative: &Path,
+    store: &mut Store,
+    remaining: &mut usize,
+    entries: &mut usize,
+) -> Result<()> {
+    if relative.components().count() > 64 {
+        return Err(refused("local Code directory tree is too deep"));
+    }
     let dir = root.join(relative);
     safe_fs::reject_symlink(&dir)?;
     for entry in fs::read_dir(&dir)? {
         let entry = entry?;
+        *entries = entries
+            .checked_sub(1)
+            .ok_or_else(|| refused("too many local Code entries"))?;
         let name = entry.file_name();
         let text = name
             .to_str()
@@ -303,7 +549,7 @@ fn collect(root: &Path, relative: &Path, store: &mut Store, remaining: &mut usiz
         let rel = relative.join(name);
         let ty = entry.file_type()?;
         if ty.is_dir() {
-            collect(root, &rel, store, remaining)?;
+            collect(root, &rel, store, remaining, entries)?;
         } else if ty.is_file() {
             if store.files.len() >= MAX_FILES {
                 return Err(refused("too many local Code files"));
@@ -324,10 +570,22 @@ fn collect(root: &Path, relative: &Path, store: &mut Store, remaining: &mut usiz
 }
 
 impl Store {
+    fn byte_len(&self) -> usize {
+        self.files.values().map(Vec::len).sum::<usize>()
+            + self.worktrees.as_ref().map_or(0, Vec::len)
+            + self.presets.as_ref().map_or(0, Vec::len)
+    }
     fn read(location: &Location) -> Result<Self> {
+        location.validate_paths()?;
         let mut store = Self::default();
         let mut remaining = MAX_BYTES;
-        collect(&location.bucket, Path::new(""), &mut store, &mut remaining)?;
+        collect(
+            &location.bucket,
+            Path::new(""),
+            &mut store,
+            &mut remaining,
+            &mut { MAX_FILES },
+        )?;
         for (name, target) in [
             (WORKTREES, &mut store.worktrees),
             (PRESETS, &mut store.presets),
@@ -395,7 +653,13 @@ impl Store {
         }
         Ok(())
     }
-    fn apply(&self, location: &Location, tag: &str) -> Result<()> {
+    fn apply(
+        &self,
+        location: &Location,
+        tag: &str,
+        provider: &dyn PlatformProvider,
+        expected: &Store,
+    ) -> Result<()> {
         let stage = location.bucket.with_file_name(format!(".csw-stage-{tag}"));
         let old = location
             .bucket
@@ -408,6 +672,13 @@ impl Store {
             write_private(&stage.join(relative), data)?;
         }
         sync_directories(&stage)?;
+        stopped(provider)?;
+        location.validate_paths()?;
+        if Store::read(location)?.fingerprint() != expected.fingerprint() {
+            return Err(conflict(
+                "a local Code store changed while replacement was staged",
+            ));
+        }
         safe_fs::reject_symlink(&location.bucket)?;
         let had_bucket = location.bucket.try_exists()?;
         if had_bucket {
@@ -429,15 +700,38 @@ impl Store {
                 .parent()
                 .ok_or_else(|| refused("invalid bucket path"))?,
         )?;
+        let mut expected = expected.clone();
+        expected.files = self.files.clone();
         for (name, bytes) in [(WORKTREES, &self.worktrees), (PRESETS, &self.presets)] {
             let path = location.desktop.join(name);
             safe_fs::reject_symlink(&path)?;
             if let Some(bytes) = bytes {
                 let temp = path.with_file_name(format!(".{name}-{tag}"));
                 write_private(&temp, bytes)?;
+                stopped(provider)?;
+                location.validate_paths()?;
+                if Store::read(location)?.fingerprint() != expected.fingerprint() {
+                    return Err(conflict(
+                        "a local Code store changed while settings were staged",
+                    ));
+                }
                 fs::rename(temp, path)?;
-            } else if path.exists() {
-                fs::remove_file(path)?;
+            } else {
+                stopped(provider)?;
+                location.validate_paths()?;
+                if Store::read(location)?.fingerprint() != expected.fingerprint() {
+                    return Err(conflict(
+                        "a local Code store changed before settings removal",
+                    ));
+                }
+                if path.try_exists()? {
+                    fs::remove_file(path)?;
+                }
+            }
+            if name == WORKTREES {
+                expected.worktrees = self.worktrees.clone();
+            } else {
+                expected.presets = self.presets.clone();
             }
         }
         sync_directory(&location.desktop)?;
@@ -508,8 +802,8 @@ fn journal_locations(manager: &ProfileManager, journal: &Journal) -> Result<Vec<
     let names: Vec<_> = std::iter::once(&journal.group.source)
         .chain(&journal.group.members)
         .collect();
-    if journal.version != 1
-        || journal.group.version != 1
+    if ![1, 2].contains(&journal.version)
+        || ![1, 2].contains(&journal.group.version)
         || journal.group.generation != journal.tag
         || journal.tag.is_empty()
         || journal.tag.len() > 100
@@ -520,8 +814,9 @@ fn journal_locations(manager: &ProfileManager, journal: &Journal) -> Result<Vec<
         return Err(refused("invalid recovery journal"));
     }
     let mut result = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
     for (expected, (name, desktop, bucket)) in names.iter().zip(&journal.places) {
-        if expected.as_str() != name {
+        if expected.as_str() != name || !seen.insert(name) {
             return Err(refused("recovery participants do not match"));
         }
         let profile = manager.get_profile(name)?;
@@ -556,10 +851,21 @@ fn journal_locations(manager: &ProfileManager, journal: &Journal) -> Result<Vec<
             checked.push(part);
             safe_fs::reject_symlink(&checked)?;
         }
+        if journal.group.version == 2
+            && journal.group.identities.get(name)
+                != Some(&Identity {
+                    desktop: desktop.clone(),
+                    bucket: bucket.clone(),
+                    cli: profile.isolation.cli_config_dir.clone(),
+                })
+        {
+            return Err(refused("recovery environment identity changed"));
+        }
         result.push(Location {
             name: name.clone(),
             desktop: desktop.clone(),
             bucket: bucket.clone(),
+            cli: profile.isolation.cli_config_dir.clone(),
             account: parts[0]
                 .as_os_str()
                 .to_str()
@@ -578,13 +884,13 @@ fn recover(manager: &ProfileManager, provider: &dyn PlatformProvider) -> Result<
     }
     stopped(provider)?;
     no_pending_launch(provider)?;
-    let journal: Journal = serde_json::from_slice(&read_regular(&path, &mut 256_000)?)
+    let journal: Journal = serde_json::from_slice(&read_regular(&path, &mut (3 * MAX_CONFIG))?)
         .map_err(|_| refused("invalid recovery journal"))?;
     let places = journal_locations(manager, &journal)?;
     let config = root.join(CONFIG);
     let current = match fs::symlink_metadata(&config) {
         Ok(_) => Some(
-            String::from_utf8(read_regular(&config, &mut 65536)?)
+            String::from_utf8(read_regular(&config, &mut { MAX_CONFIG })?)
                 .map_err(|_| refused("invalid recovery configuration"))?,
         ),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -600,27 +906,29 @@ fn recover(manager: &ProfileManager, provider: &dyn PlatformProvider) -> Result<
         safe_fs::reject_symlink(&backup_root)?;
         let backup = backup_root.join(&journal.tag);
         safe_fs::reject_symlink(&backup)?;
-        let originals: Vec<_> = places
-            .iter()
-            .enumerate()
-            .map(|(i, p)| {
+        let originals = bounded_stores(
+            places.iter().enumerate().map(|(i, p)| {
                 safe_fs::reject_symlink(&backup.join(i.to_string()))?;
                 Store::read(&Location {
                     name: p.name.clone(),
                     desktop: backup.join(i.to_string()),
                     bucket: backup.join(i.to_string()).join("bucket"),
                     account: p.account.clone(),
+                    cli: p.cli.clone(),
                 })
-            })
-            .collect::<Result<_>>()?;
+            }),
+            MAX_BYTES,
+        )?;
         let authority = places
             .iter()
             .position(|p| p.name == journal.authority)
             .ok_or_else(|| refused("invalid recovery authority"))?;
-        let incoming: Vec<_> = places
-            .iter()
-            .map(|p| originals[authority].for_account(&places[authority].account, &p.account))
-            .collect::<Result<_>>()?;
+        let selected = if journal.version == 2 {
+            backup_store(&backup, "incoming", &places[authority])?
+        } else {
+            originals[authority].clone()
+        };
+        let incoming = remap_stores(&selected, &places[authority].account, &places)?;
         for (place, store) in places.iter().zip(&incoming) {
             if journal.group.fingerprints.get(&place.name) != Some(&store.fingerprint()) {
                 return Err(refused(
@@ -628,14 +936,77 @@ fn recover(manager: &ProfileManager, provider: &dyn PlatformProvider) -> Result<
                 ));
             }
         }
-        if toml::to_string(&journal.group)? != journal.planned_config {
+        if toml::from_str::<Group>(&journal.planned_config)
+            .map_err(|_| refused("invalid planned recovery configuration"))?
+            != journal.group
+        {
             return Err(refused(
                 "recovery configuration does not match planned transaction",
             ));
         }
-        let tag = nonce()?;
+        // Bucket replacement is atomic; individual settings can be on either
+        // side of a crash. Unknown bytes must not be silently overwritten.
+        for ((store, place), original) in incoming.iter().zip(&places).zip(&originals) {
+            stopped(provider)?;
+            let mut read_place = Location {
+                name: place.name.clone(),
+                desktop: place.desktop.clone(),
+                bucket: place.bucket.clone(),
+                cli: place.cli.clone(),
+                account: place.account.clone(),
+            };
+            if !place.bucket.try_exists()? {
+                read_place.bucket = place
+                    .bucket
+                    .with_file_name(format!(".csw-previous-{}", journal.tag));
+            }
+            if !Store::read(&read_place)?.transaction_state(original, store) {
+                return Err(CswError::LocalCodeRecoveryConflict(
+                    "unknown local Code updates appeared during interrupted synchronization; recovery is paused",
+                ));
+            }
+        }
+        for ((store, place), original) in incoming.iter().zip(&places).zip(&originals) {
+            stopped(provider)?;
+            // Revalidate each target again immediately before its replacement.
+            let prior = place
+                .bucket
+                .with_file_name(format!(".csw-previous-{}", journal.tag));
+            if !place.bucket.try_exists()? {
+                safe_fs::reject_symlink(&prior)?;
+                fs::rename(&prior, &place.bucket)?;
+            }
+            let expected = Store::read(place)?;
+            if !expected.transaction_state(original, store) {
+                return Err(CswError::LocalCodeRecoveryConflict(
+                    "a local Code store changed during recovery",
+                ));
+            }
+            for prefix in [".csw-stage-", ".csw-previous-"] {
+                let debris = place
+                    .bucket
+                    .with_file_name(format!("{prefix}{}", journal.tag));
+                safe_fs::reject_symlink(&debris)?;
+                if debris.try_exists()? {
+                    fs::remove_dir_all(debris)?;
+                }
+            }
+            for name in [WORKTREES, PRESETS] {
+                let debris = place.desktop.join(format!(".{name}-{}", journal.tag));
+                safe_fs::reject_symlink(&debris)?;
+                if debris.try_exists()? {
+                    fs::remove_file(debris)?;
+                }
+            }
+            store.apply(place, &journal.tag, provider, &expected)?;
+        }
+        stopped(provider)?;
         for (store, place) in incoming.iter().zip(&places) {
-            store.apply(place, &tag)?;
+            if Store::read(place)?.fingerprint() != store.fingerprint() {
+                return Err(CswError::LocalCodeRecoveryConflict(
+                    "a local Code store changed before recovery committed",
+                ));
+            }
         }
         atomic_write(&config, journal.planned_config.as_bytes())?;
     }
@@ -670,7 +1041,7 @@ fn load(provider: &dyn PlatformProvider) -> Result<Option<Group>> {
         Err(e) => return Err(e.into()),
         Ok(_) => (),
     }
-    let bytes = read_regular(&path, &mut 65536)?;
+    let bytes = read_regular(&path, &mut { MAX_CONFIG })?;
     let group = toml::from_str(
         std::str::from_utf8(&bytes).map_err(|_| refused("invalid sharing configuration"))?,
     )
@@ -687,31 +1058,21 @@ fn synchronize(
     stopped(provider)?;
     no_pending_launch(provider)?;
     let places = locations(manager, group)?;
-    let originals: Vec<_> = places.iter().map(Store::read).collect::<Result<_>>()?;
-    let changed: Vec<_> = places
-        .iter()
-        .zip(&originals)
-        .filter(|(p, s)| group.fingerprints.get(&p.name) != Some(&s.fingerprint()))
-        .map(|(p, _)| p.name.as_str())
-        .collect();
-    let authority = if let Some(seed) = seed {
-        seed
-    } else {
-        match changed.as_slice() {
-            [] => group.source.as_str(),
-            [one] => one,
-            _ => {
-                return Err(refused(
-                    "multiple environments changed; refusing to choose which complete store to overwrite",
-                ));
-            }
-        }
-    };
-    let index = places
-        .iter()
-        .position(|p| p.name == authority)
-        .ok_or_else(|| refused("source is not a participant"))?;
-    if seed.is_none() && changed.is_empty() {
+    let originals = bounded_stores(places.iter().map(Store::read), MAX_BYTES)?;
+    let index = authority_index(provider, group, &places, &originals, seed)?;
+    let authority = places[index].name.clone();
+    let mut selected = originals[index].clone();
+    if seed.is_none() {
+        selected.merge_housekeeping(&originals)?;
+    }
+    let incoming = remap_stores(&selected, &places[index].account, &places)?;
+    if seed.is_none()
+        && group.version == 2
+        && originals
+            .iter()
+            .zip(&incoming)
+            .all(|(a, b)| a.fingerprint() == b.fingerprint())
+    {
         return Ok(provider.app_data_dir().join("native-code-backups"));
     }
     let tag = nonce()?;
@@ -733,10 +1094,9 @@ fn synchronize(
     )?;
     let prior_config = if load(provider)?.is_some() {
         Some(
-            String::from_utf8(read_regular(
-                &provider.app_data_dir().join(CONFIG),
-                &mut 65536,
-            )?)
+            String::from_utf8(read_regular(&provider.app_data_dir().join(CONFIG), &mut {
+                MAX_CONFIG
+            })?)
             .map_err(|_| refused("invalid sharing configuration"))?,
         )
     } else {
@@ -747,12 +1107,31 @@ fn synchronize(
     }
     sync_directories(&backup)?;
     sync_directory(&backup_root)?;
-    let incoming: Vec<_> = places
-        .iter()
-        .map(|p| originals[index].for_account(&places[index].account, &p.account))
-        .collect::<Result<_>>()?;
+    // The selected store includes merged housekeeping, so recovery needs its
+    // exact bytes as well as each original (which always remains untouched).
+    selected.snapshot(&backup.join("incoming"))?;
+    sync_directories(&backup)?;
+    sync_directory(&backup_root)?;
     let config = provider.app_data_dir().join(CONFIG);
     let temp = config.with_file_name(format!(".{CONFIG}-{tag}"));
+    for (place, store) in places.iter().zip(&incoming) {
+        let known = group.known_content.entry(place.name.clone()).or_default();
+        if let Some(prior) = group.content_fingerprints.get(&place.name) {
+            known.retain(|k| k != prior);
+            known.push(prior.clone());
+        }
+        let next = store.content_fingerprint()?;
+        known.retain(|k| k != &next);
+        known.push(next.clone());
+        if known.len() > 16 {
+            known.drain(..known.len() - 16);
+        }
+        group.content_fingerprints.insert(place.name.clone(), next);
+        group
+            .identities
+            .insert(place.name.clone(), place.identity());
+    }
+    group.version = 2;
     group.fingerprints = places
         .iter()
         .zip(&incoming)
@@ -762,10 +1141,30 @@ fn synchronize(
     let planned_config = toml::to_string(group)?;
     write_private(&temp, planned_config.as_bytes())?;
     stopped(provider)?;
+    // Revalidate identities and the exact source/destination bytes after backup.
+    let checked = locations(manager, group)?;
+    for (place, original) in checked.iter().zip(&originals) {
+        if Store::read(place)?.fingerprint() != original.fingerprint() {
+            return Err(conflict(
+                "a local Code store changed during backup; no replacement was started",
+            ));
+        }
+    }
+    let observed_config = match fs::symlink_metadata(&config) {
+        Ok(_) => Some(
+            String::from_utf8(read_regular(&config, &mut { MAX_CONFIG })?)
+                .map_err(|_| refused("invalid sharing configuration"))?,
+        ),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    if observed_config != prior_config {
+        return Err(conflict("sharing configuration changed during backup"));
+    }
     let journal = Journal {
-        version: 1,
+        version: 2,
         tag: tag.clone(),
-        authority: authority.into(),
+        authority,
         group: group.clone(),
         places: places
             .iter()
@@ -779,8 +1178,18 @@ fn synchronize(
         &serde_json::to_vec(&journal)?,
     )?;
     let result = (|| -> Result<()> {
+        for ((store, place), original) in incoming.iter().zip(&places).zip(&originals) {
+            stopped(provider)?;
+            if Store::read(place)?.fingerprint() != original.fingerprint() {
+                return Err(conflict("a local Code store changed before replacement"));
+            }
+            store.apply(place, &tag, provider, original)?;
+        }
+        stopped(provider)?;
         for (store, place) in incoming.iter().zip(&places) {
-            store.apply(place, &tag)?;
+            if Store::read(place)?.fingerprint() != store.fingerprint() {
+                return Err(conflict("a local Code store changed during replacement"));
+            }
         }
         fs::rename(&temp, &config)?;
         sync_directory(&provider.app_data_dir())?;
@@ -810,6 +1219,10 @@ pub fn configure(
         source: source.into(),
         members: members.into(),
         fingerprints: BTreeMap::new(),
+        content_fingerprints: BTreeMap::new(),
+        known_content: BTreeMap::new(),
+        identities: BTreeMap::new(),
+        last_launch: None,
     };
     synchronize(manager, provider, &mut group, Some(source))
 }
@@ -844,6 +1257,10 @@ pub fn add_member(
         source: source.clone(),
         members: Vec::new(),
         fingerprints: BTreeMap::new(),
+        content_fingerprints: BTreeMap::new(),
+        known_content: BTreeMap::new(),
+        identities: BTreeMap::new(),
+        last_launch: None,
     });
     if group.source == name || group.members.iter().any(|n| n == name) {
         return Err(refused(
@@ -855,15 +1272,30 @@ pub fn add_member(
             "the sharing source is outside the current local Code group",
         ));
     }
-    group.members.push(name.into());
+    // Validate the new member separately; it has no synchronized identity yet.
+    Store::read(&locate(&profile)?)?;
     // Validate all stores/links before changing the existing group at all.
-    for place in locations(manager, &group)? {
+    let mut prospective = group.clone();
+    prospective.members.push(name.into());
+    prospective
+        .identities
+        .insert(name.into(), locate(&profile)?.identity());
+    for place in locations(manager, &prospective)? {
         Store::read(&place)?;
     }
     if let Some(mut current) = existing {
         synchronize(manager, provider, &mut current, None)?;
+        group = current;
     }
-    let authority = group.source.clone();
+    group.members.push(name.into());
+    group
+        .identities
+        .insert(name.into(), locate(&profile)?.identity());
+    let authority = group
+        .last_launch
+        .as_ref()
+        .map_or(&group.source, |l| &l.name)
+        .clone();
     synchronize(manager, provider, &mut group, Some(&authority))
 }
 
@@ -943,4 +1375,92 @@ pub fn disable(manager: &ProfileManager, provider: &dyn PlatformProvider) -> Res
         fs::remove_file(provider.app_data_dir().join(CONFIG))?;
     }
     sync_directory(&provider.app_data_dir())
+}
+
+#[cfg(test)]
+mod commit_tests {
+    use super::*;
+    use crate::platform::mock::MockPlatformProvider;
+
+    fn place(root: &Path, name: &str, account: &str) -> Location {
+        Location {
+            name: name.into(),
+            desktop: root.into(),
+            bucket: root.join("bucket"),
+            account: account.into(),
+            cli: root.join("cli"),
+        }
+    }
+
+    #[test]
+    fn staged_replacement_rechecks_bytes_and_process_state_before_commit() {
+        for running in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            let location = place(&tmp.path().join("desktop"), "synthetic", "account");
+            fs::create_dir_all(&location.bucket).unwrap();
+            fs::write(
+                location.bucket.join("thread.json"),
+                b"{\"title\":\"before\"}",
+            )
+            .unwrap();
+            let prior = Store::read(&location).unwrap();
+            let mut next = prior.clone();
+            next.files
+                .insert("thread.json".into(), b"{\"title\":\"incoming\"}".to_vec());
+            // A new write between the caller's snapshot and the apply commit.
+            fs::write(
+                location.bucket.join("thread.json"),
+                b"{\"title\":\"unbacked update\"}",
+            )
+            .unwrap();
+            let provider = MockPlatformProvider::new(
+                location.desktop.clone(),
+                location.cli.clone(),
+                tmp.path().join("app"),
+            )
+            .with_desktop_running(running);
+            let result = next.apply(&location, "test", &provider, &prior);
+            assert!(result.is_err());
+            // The stage is durable, proving the check runs at the commit point.
+            assert!(
+                location
+                    .bucket
+                    .with_file_name(".csw-stage-test")
+                    .join("thread.json")
+                    .exists()
+            );
+            assert_eq!(
+                fs::read(location.bucket.join("thread.json")).unwrap(),
+                b"{\"title\":\"unbacked update\"}"
+            );
+            assert!(
+                !location
+                    .bucket
+                    .with_file_name(".csw-previous-test")
+                    .exists()
+            );
+        }
+    }
+
+    #[test]
+    fn preset_expansion_is_bounded_after_account_remapping() {
+        let tmp = tempfile::tempdir().unwrap();
+        let places = [
+            place(&tmp.path().join("one"), "one", "a"),
+            place(&tmp.path().join("two"), "two", "b"),
+        ];
+        let source = Store {
+            presets: Some(
+                serde_json::to_vec(
+                    &serde_json::json!({"byAccount":{"a":{"body":"x".repeat(100)}}}),
+                )
+                .unwrap(),
+            ),
+            ..Store::default()
+        };
+        let pre_remap_total = source.byte_len() * places.len();
+        assert!(remap_stores_with_limit(&source, "a", &places, pre_remap_total).is_err());
+        assert!(remap_stores_with_limit(&source, "a", &places, pre_remap_total * 2).is_ok());
+        assert!(!places[0].bucket.exists());
+    }
 }

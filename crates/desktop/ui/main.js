@@ -1430,9 +1430,23 @@ function launchError(code) {
   if (code === 'launch_pending') return T('現在の起動予約を確認してください。終了待ちの間はキャンセルできます。', 'Check the current pending launch. You can cancel while it is waiting for you to quit Claude.');
   if (code === 'launch_committed') return T('起動処理が始まったため、キャンセルできません。', 'Launching has started and can no longer be canceled.');
   if (code === 'launch_unconfirmed') return T('Claudeの起動を確認できません。二重起動を防ぐため、再試行していません。CSWを再起動する前にClaudeの状態を確認してください。', 'Claude startup could not be confirmed. No retry was made to avoid a duplicate launch. Check Claude before restarting CSW.');
+  if (code === 'history_conflict') return T('別の環境のCode履歴にも変更があります。作業を終えてClaudeを終了し、元環境を指定して共有を再設定してください。', 'Code history has conflicting changes in another environment. Finish all work, quit Claude, then reconfigure sharing with an explicit source environment.');
+  if (code === 'history_recovery_needed') return T('中断したCode履歴の引き継ぎ後に別の変更があり、復元を停止しています。バックアップと処理記録を確認してから復元してください。', 'Code history changed after an interrupted handoff. Recovery is paused. Inspect the backups and transaction journal before repairing it.');
+  if (code === 'history_unavailable') return T('共有するCode履歴の検証または復元が必要なため、起動していません。共有設定とバックアップを確認してください。', 'Shared Code history needs validation or recovery. Check the sharing setup and backups before launching.');
+  if (code === 'history_launch_pending') return T('前回の起動を確認できず、Code履歴の同期を停止しています。Claudeの状態を確認し、終了後に共有を解除して元環境を指定し直してください。', 'A previous launch is unconfirmed, so Code history synchronization is blocked. Check Claude, then quit it and disable and reconfigure sharing with an explicit source.');
+  if (code === 'launch_failed') return T('Claudeの起動要求に失敗しました。Claudeの状態を確認してから、再度操作してください。共有中は起動の予約が残る場合があります。', 'The Claude launch request failed. Check Claude before trying again. A shared Code launch reservation may remain.');
+  if (code === 'desktop_reappeared') return T('Claudeが再び起動したため、追加の起動要求を送りませんでした。Claudeを終了してから操作してください。', 'Claude started again before launch. Quit Claude before trying again.');
+  if (code === 'launch_process_unavailable') return T('Claudeへ起動を要求しましたが、プロセス状態を確認できません。再試行せず、Claudeの状態を確認してください。', 'Claude was asked to launch, but its process state could not be verified. Check Claude before trying again.');
   if (code === 'process_unavailable') return T('Claudeの起動状態を確認できません。追加の起動要求は送りません。', 'Could not verify Claude’s process state. No further launch request will be sent.');
   if (code === 'target_changed' || code === 'target_unavailable') return T('予約した環境が変更または削除されたため、起動していません。環境を確認してから予約し直してください。', 'The requested environment changed or was removed. Check it before requesting another launch.');
   return T('環境を起動できませんでした。Claudeと環境の状態を確認してください。', 'Could not launch the environment. Check Claude and the environment.');
+}
+
+function reopenFailureMessage(result) {
+  const errors = [...new Set(Object.values(result.errors || {}))];
+  const detail = errors.filter(code => code !== 'desktop_reappeared');
+  if (detail.length) return detail.map(launchError).join(' ');
+  return launchError('desktop_reappeared');
 }
 
 function renderPendingLaunch() {
@@ -1978,19 +1992,15 @@ function wireEvents() {
   el.btnReopen.addEventListener('click', async () => {
     let res;
     try { res = await invoke('reopen_previous_set'); }
-    catch (e) { showToast(T('環境を開き直せませんでした。', 'Could not reopen the environments.'), true); return; }
+    catch (e) { showToast(launchError(String(e)), true); return; }
     reopenOffer = [];
     el.reopenBanner.hidden = true;
-    const disp = (n) => (n === 'default' ? T('既存のClaude', 'Existing Claude') : n);
     if (res.launched && res.launched.length) {
       showToast(T(`${res.launched.length}個の環境を開き直しました。`,
         `Reopened ${res.launched.length} environment${res.launched.length === 1 ? '' : 's'}.`));
     }
     if (res.blocked && res.blocked.length) {
-      const listJa = res.blocked.map((n) => `「${disp(n)}」`).join('');
-      const listEn = res.blocked.map((n) => `"${disp(n)}"`).join(', ');
-      showToast(T(`${listJa}を開くには、いま動いているClaudeを終了してください。`,
-        `To reopen ${listEn}, quit the Claude that is running.`), true);
+      showToast(reopenFailureMessage(res), true);
     }
     await refreshRunning();
   });

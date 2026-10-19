@@ -12,13 +12,12 @@ mod dmg;
 mod usage_cache;
 
 use csw_core::switcher::pending::{
-    DesktopLaunchOperations, DesktopState, LaunchOperations, LaunchPhase, LaunchQueue,
-    PendingLaunch,
+    DesktopLaunchOperations, LaunchOperations, LaunchPhase, LaunchQueue, PendingLaunch,
 };
 
 use csw_core::platform::create_provider;
 use csw_core::profile::{ProfileManager, SharingConfig, SharingMode};
-use csw_core::switcher::{ContextSwitcher, desktop_dir_running};
+use csw_core::switcher::desktop_dir_running;
 
 // Global state holding our components
 struct AppState {
@@ -601,49 +600,43 @@ async fn reopen_previous_set(
     let mut launched: Vec<String> = Vec::new();
     let mut attempted: Vec<String> = Vec::new();
     let mut blocked = plan.blocked;
-    if let Some(name) = &plan.active {
-        let switcher = ContextSwitcher::new(state.provider.clone(), state.profile_manager.clone());
-        if matches!(
-            state.launch_operations.inspect(name),
-            Ok(DesktopState::Stopped)
-        ) && switcher.switch_to(name).is_ok()
-            && let Ok(profile) = state.profile_manager.get_profile(name)
-        {
-            attempted.push(name.clone());
-            if csw_core::switcher::desktop::launch_desktop(&profile, state.provider.as_ref())
-                .is_ok()
-            {
-                launched.push(name.clone());
-            } else {
-                blocked.push(name.clone());
-            }
-        } else {
+    let mut errors: std::collections::BTreeMap<String, &'static str> = blocked
+        .iter()
+        .map(|name| (name.clone(), "desktop_reappeared"))
+        .collect();
+    let mut uncertain = false;
+    let requests = plan
+        .active
+        .iter()
+        .map(|name| (name, false))
+        .chain(plan.additional.iter().map(|name| (name, true)));
+    for (name, alongside) in requests {
+        if uncertain {
             blocked.push(name.clone());
+            errors.insert(name.clone(), "launch_pending");
+            continue;
         }
-    }
-    for name in &plan.additional {
-        match state.launch_operations.inspect(name) {
-            Ok(DesktopState::TargetRunning(_)) => continue,
-            Err(_) => {
-                blocked.push(name.clone());
-                continue;
-            }
-            _ => {}
-        }
-        if let Ok(profile) = state.profile_manager.get_profile(name)
-            && !profile.profile.is_default
-            && profile.sharing.is_fully_isolated()
-        {
-            attempted.push(name.clone());
-            if csw_core::switcher::desktop::launch_desktop(&profile, state.provider.as_ref())
-                .is_ok()
-            {
-                launched.push(name.clone());
-            } else {
-                blocked.push(name.clone());
-            }
+        let ops = state.launch_operations.as_ref();
+        let result = if alongside {
+            ops.validate_alongside(name)
+                .and_then(|identity| ops.launch_alongside(name, &identity))
         } else {
-            blocked.push(name.clone());
+            ops.validate(name)
+                .and_then(|identity| ops.launch(name, &identity))
+        };
+        match result {
+            Ok(()) => {
+                attempted.push(name.clone());
+                launched.push(name.clone());
+            }
+            Err(code) => {
+                if csw_core::switcher::pending::uncertain_launch(code) {
+                    attempted.push(name.clone());
+                    uncertain = true;
+                }
+                blocked.push(name.clone());
+                errors.insert(name.clone(), code);
+            }
         }
     }
     if !attempted.is_empty() {
@@ -660,13 +653,18 @@ async fn reopen_previous_set(
         let _ = csw_core::session::clear_reopen_set(&state.provider.app_data_dir());
     }
     update_tray_menu(&app)?;
-    Ok(ReopenResult { launched, blocked })
+    Ok(ReopenResult {
+        launched,
+        blocked,
+        errors,
+    })
 }
 
 #[derive(serde::Serialize)]
 struct ReopenResult {
     launched: Vec<String>,
     blocked: Vec<String>,
+    errors: std::collections::BTreeMap<String, &'static str>,
 }
 
 /// Dismiss the reopen offer: clear the recorded set so it does not prompt again.
