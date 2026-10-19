@@ -100,14 +100,15 @@ enum ProfileAction {
     Create {
         /// Environment name
         name: String,
-        /// Sharing mode: "isolate" (default; Separate everything),
+        /// Sharing mode: "share_code" (default; shared local Code with separate logins),
+        /// "isolate" (Separate everything),
         /// "share_settings" (Separate conversations and memory too), or
         /// "share_workspace" (Separate the account only).
         /// "share" is a deprecated alias for "share_settings".
         #[arg(
             long,
-            default_value = "isolate",
-            value_parser = ["isolate", "share_settings", "share_workspace", "share"]
+            default_value = "share_code",
+            value_parser = ["share_code", "isolate", "share_settings", "share_workspace", "share"]
         )]
         mode: String,
         /// Free-form note stored with the environment (single line, 200
@@ -221,13 +222,14 @@ fn main() -> anyhow::Result<()> {
                         mode.bold()
                     );
 
-                    // Mirror the GUI's three modes (build_sharing_config in the desktop
+                    // Mirror the GUI's four modes (build_sharing_config in the desktop
                     // crate). "share" is a backward-compatible alias for "share_settings".
                     // The account-keyed files (config.json, claude_desktop_config.json),
                     // the device id and sessions/ are not SharingConfig fields, so no
                     // preset can express sharing them. The linker isolates them
                     // unconditionally.
                     let sharing = match mode.as_str() {
+                        "share_code" => SharingConfig::share_code_preset(),
                         "share_settings" | "share" => SharingConfig::share_settings_preset(),
                         "share_workspace" => SharingConfig::share_workspace_preset(),
                         _ => SharingConfig::default(), // "isolate"
@@ -247,6 +249,14 @@ fn main() -> anyhow::Result<()> {
                                 }
                             }
                             println!("{} Environment '{}' created.", "OK".green(), name.cyan());
+                            if mode == "share_code" {
+                                println!(
+                                    "  Local Code transcripts, memory and input history are shared. Desktop logins remain separate."
+                                );
+                                println!(
+                                    "  To share the native sidebar too: sign in normally, open Code once in each environment, quit every Claude, then use Switcher's 'Set up shared Code' action."
+                                );
+                            }
                             println!(
                                 "  Desktop Data: {:?}",
                                 provider
@@ -724,5 +734,30 @@ Not auto-fixed to avoid losing the local copy.",
             "!!".red().bold(),
             report.issue_count
         );
+    }
+}
+
+#[cfg(test)]
+mod defaults_tests {
+    use super::*;
+
+    #[test]
+    fn profile_create_defaults_to_shared_code_but_isolation_remains_explicit() {
+        for (args, expected) in [
+            (vec!["csw", "profile", "create", "Research"], "share_code"),
+            (
+                vec!["csw", "profile", "create", "Private", "--mode", "isolate"],
+                "isolate",
+            ),
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            let Commands::Profile {
+                action: ProfileAction::Create { mode, .. },
+            } = cli.command
+            else {
+                panic!("expected profile create");
+            };
+            assert_eq!(mode, expected);
+        }
     }
 }

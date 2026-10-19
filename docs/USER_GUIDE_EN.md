@@ -30,8 +30,8 @@ First, the account. An account is the Claude account you sign in to; your billin
 The standard setup preserves Existing Claude. Optional complete local Code sharing, described below, additionally synchronizes its Code stores while preserving separate sign-ins.
 
 ### Step 1: Install the Application
-1. Download the latest `.dmg` file from the [Releases](https://github.com/matsumotory/claude-desktop-switcher/releases/latest) page.
-2. Drag and drop the downloaded `Claude-Desktop-Switcher.app` into your macOS `Applications` folder.
+1. For this fork's shared-Code defaults, [build the app and CLI from this repository](LOCAL_BUILD.md#build-and-use). Upstream `.dmg` downloads do not include these changes.
+2. Open the built app at `target/release/bundle/macos/Claude-Desktop-Switcher.app`, or copy that bundle to your macOS Applications folder. The matching CLI is `target/release/csw`.
 3. Launch the app. The settings window opens, and a menu bar icon also appears (it can be hidden when the menu bar is crowded, but you can always reopen the settings window from the Dock icon). If the installer disk image is still mounted, a prompt appears at the top of the settings window: press "Eject" to eject it right there.
 4. On first launch only, the welcome screen shows a few helper cards. They cover three points: your Existing Claude is protected, you can switch between environments, and Claude Code in the terminal uses the same environment. They appear once and then go away.
 
@@ -42,7 +42,7 @@ Create a new isolated environment for work or research.
 
 ![Claude Desktop Switcher Settings UI](../website/assets/hero.png)
 
-**By default, this app separates everything to strictly prevent accidental data mixing.**
+**This fork defaults to Share local Code for new environments. Existing environments are unchanged.**
 
 For other cases (such as "I want to reuse my global rules, skills, and plugins, but route usage to my Work account"), you can adjust what carries over.
 
@@ -52,16 +52,17 @@ For other cases (such as "I want to reuse my global rules, skills, and plugins, 
    * **Name**: (e.g., `Work`, `Research`)
    * **Icon (optional)**: pick from the prepared icons
    * **Note (optional)**: write down what the environment is for and which account signs in. The note appears in the environment list and can be edited later on the detail screen.
-4. **Choose how it should be separated: pick one of three modes**
-   The account is always separate in every mode (the create screen states this once up front). The three modes differ only in what else carries over, listed from most carried over to least. Open **"Configure in detail, item by item"** if you want to change individual components.
+4. **Choose how it should be separated: pick one of four modes**
+   The account is always separate in every mode (the create screen states this once up front). The four modes differ only in what else carries over, listed from most carried over to least. Open **"Configure in detail, item by item"** if you want to change individual components.
 
+   * **Share local Code (default)**: Share local Code transcripts, memory and input history. Keep rules, permissions, skills, plugins and Desktop logins separate. After first sign-in, use **Set up shared Code** to back up and seed the native sidebar, repos/worktrees and presets, as described below. Cloud Chat stays separate.
    * **Separate the account only**: Carry over conversation history and auto-memory too; only the account is separate. Run research and development on separate billing while keeping one continuous workspace.
    * **Separate conversations and memory too**: Carry over your global rules, skills, plugins and tool permissions; keep conversation history and auto-memory to this environment. Split by purpose while reusing your setup.
-   * **Separate everything**: The recommended default. Nothing carries over. The new environment is fully independent. For clients and projects, or work-vs-personal, that must not mix. Your existing Claude is never touched.
+   * **Separate everything**: An explicit isolation option. Nothing carries over. The new environment is fully independent. For clients and projects, or work-vs-personal, that must not mix. Your existing Claude is never touched.
 
    The difference between "Separate conversations and memory too" and "Separate the account only" is whether the conversation history and auto-memory (projects/) and the input history (history.jsonl) carry over.
 
-   > If your existing Claude isn't found at the standard locations (for example, when Claude Code's config has been moved elsewhere via `CLAUDE_CONFIG_DIR`), the carry-over modes won't bring over whichever side is missing. If neither the Desktop nor the CLI config is found, there's nothing to carry over, so only "Separate everything" can be created. The create screen explains this in either case.
+   > If your existing Claude isn't found at the standard locations (for example, when Claude Code's config has been moved elsewhere via `CLAUDE_CONFIG_DIR`), the carry-over modes won't bring over whichever side is missing. If neither the Desktop nor the CLI config is found, there's nothing to carry over, the older carry-over modes are unavailable. Share local Code can still initialize empty content stores without a CLI login; native sidebar sharing waits for Code to be opened in both Desktop environments. The create screen explains this in either case.
 
    **< How to choose >**
    * **Case A: a completely separate project**
@@ -173,7 +174,15 @@ These are records for an environment, not verification of the account currently 
 
 ### Complete local Code sharing in this fork
 
-[Build this fork's app and CLI](LOCAL_BUILD.md#build-and-use) and install both local outputs; upstream downloads do not contain these commands. With this fork's `csw` command installed, environments that already share transcripts, project memory and input history can also share complete Desktop Code stores. Quit every Claude Desktop instance, then run `csw share-code --source default --replace Research Development`, replacing the example names with your environment names. Each environment must have opened Code once and have one account/workspace directory. The source's complete stores replace the destinations after every original store has been backed up. Saved Code permissions, connector references, scheduled-task definitions, archive/deletion records and worktree leases are included.
+[Build this fork's app and CLI](LOCAL_BUILD.md#build-and-use); upstream binaries do not include this setup.
+
+1. Create an environment with the default **Share local Code** mode. Code transcripts, memory and input history share Existing Claude's content stores. Other settings and logins stay separate.
+2. Launch each new environment, sign in through the official Claude Desktop app, and open Code once in both it and Existing Claude. Exactly one account/workspace directory per environment is supported. No Claude Code CLI sign-in is required.
+3. Finish all running tasks and input waits and quit every Claude Desktop instance manually. Select the new environment in Switcher and choose **Set up shared Code**. Review the named destination/source, then **Back up and enable sharing**. This replaces the destination's complete local Code stores after backing up all participants. The app does not infer your task state or quit Claude for you.
+4. Repeat for each additional account. Adding a member preserves the existing group and carries forward its latest changes before seeding the new member. Independent conflicting changes are refused, with all originals preserved. Existing isolated profiles are not silently converted.
+5. Launch through Switcher for subsequent switches. Shared local Code includes complete sidebar records, saved Code permissions, connector references, scheduled-task definitions, archive/deletion records, worktree leases and presets. Source records are copied in full; enable this only between accounts allowed to share that work. Actual repo/worktree files remain at their existing paths. Cloud Chat, cloud Projects and sign-ins stay separate.
+
+For explicit source selection or recovery, the CLI remains available: `csw share-code --source default --replace Research Development`. Replace the example names with your environments. This command replaces the specified group's membership and seeds from the named source; the app's setup action instead adds one member without dropping current participants. Backups live under `~/.context-switcher-claude/native-code-backups/`.
 
 After setup, launch environments normally in Switcher. Existing Desktop logins stay separate; no Claude Code CLI login step is added. Before launching a participant, Switcher compares the complete stores with the previous synchronization and carries forward the one that changed. If several changed independently, it stops instead of overwriting a conflict. This takes effect through Claude's normal launch, rather than live updates in another running window. Use one participant at a time. Cloud Projects, cloud Chat conversations and Web-side custom groups are outside this feature. Backups and their locations manifest remain under `~/.context-switcher-claude/native-code-backups/`.
 

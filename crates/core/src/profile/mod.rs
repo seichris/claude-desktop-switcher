@@ -201,6 +201,19 @@ impl Default for SharingConfig {
 }
 
 impl SharingConfig {
+    /// Default for new environments in this fork. Carry local Code content,
+    /// keeping rules, permissions, extensions and Desktop sign-ins separate.
+    /// The native sidebar is enabled separately after the first Desktop sign-in
+    /// and explicit backed-up seeding; symlinks alone cannot share that catalog.
+    pub fn share_code_preset() -> Self {
+        Self {
+            cli_project_memory: SharingMode::Share,
+            cli_history: SharingMode::Share,
+            desktop_worktrees: SharingMode::Copy,
+            ..Self::default()
+        }
+    }
+
     // Some components can never be shared or copied, so they are deliberately NOT
     // fields of SharingConfig at all: there is no SharingMode to set, which makes the
     // illegal "share an account-keyed file" state unrepresentable for every caller
@@ -456,6 +469,29 @@ impl ProfileManager {
         };
 
         safe_fs::new_profile_dir(&profile_dir, name)?;
+        // Desktop creates Code transcripts here too. A CLI sign-in is not
+        // needed: initialize only absent content stores, never auth/settings.
+        if profile.sharing.cli_project_memory == SharingMode::Share
+            && profile.sharing.cli_history == SharingMode::Share
+        {
+            let cli = &source_profile.isolation.cli_config_dir;
+            safe_fs::private_dir(cli)?;
+            let projects = cli.join("projects");
+            if !projects.try_exists()? {
+                safe_fs::private_dir(&projects)?;
+            }
+            let history = cli.join("history.jsonl");
+            if !history.try_exists()? {
+                let mut options = fs::OpenOptions::new();
+                options.write(true).create_new(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+                }
+                options.open(history)?.sync_all()?;
+            }
+        }
         let linker = linker::Linker::new(self.provider.as_ref());
         linker.link_profile(&profile, &source_profile)?;
         // The directory only becomes a listed/launchable profile after setup

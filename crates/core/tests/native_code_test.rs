@@ -69,6 +69,142 @@ impl Fixture {
 }
 
 #[test]
+fn default_code_preset_works_without_cli_signin_or_copying_settings() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cli = tmp.path().join("cli");
+    let provider = Arc::new(MockPlatformProvider::new(
+        tmp.path().join("desktop"),
+        cli.clone(),
+        tmp.path().join("switcher"),
+    ));
+    let manager = ProfileManager::new(provider).unwrap();
+    let p = manager
+        .create_profile("fresh", SharingConfig::share_code_preset(), None)
+        .unwrap();
+    assert!(cli.join("projects").is_dir());
+    assert!(cli.join("history.jsonl").is_file());
+    assert_eq!(
+        p.isolation
+            .cli_config_dir
+            .join("projects")
+            .canonicalize()
+            .unwrap(),
+        cli.join("projects").canonicalize().unwrap()
+    );
+    assert_eq!(
+        p.isolation
+            .cli_config_dir
+            .join("history.jsonl")
+            .canonicalize()
+            .unwrap(),
+        cli.join("history.jsonl").canonicalize().unwrap()
+    );
+    for file in [".credentials.json", "settings.json", "CLAUDE.md"] {
+        assert!(!cli.join(file).exists());
+        assert!(!p.isolation.cli_config_dir.join(file).exists());
+    }
+    assert!(!p.sharing.is_fully_isolated());
+}
+
+#[test]
+fn gui_enrollment_seeds_first_member_after_confirmation_and_preserves_logins() {
+    let f = Fixture::new();
+    fs::write(
+        f.bucket(false).join("original.json"),
+        r#"{"original":true}"#,
+    )
+    .unwrap();
+    fs::write(f.bucket(true).join("prior.json"), r#"{"prior":true}"#).unwrap();
+    assert!(
+        native_code::add_member(f.manager.as_ref(), f.provider.as_ref(), "second", false).is_err()
+    );
+    assert!(!f.provider.app_data.join("native-code.toml").exists());
+    let backup =
+        native_code::add_member(f.manager.as_ref(), f.provider.as_ref(), "second", true).unwrap();
+    assert!(backup.join("1/bucket/prior.json").is_file());
+    assert!(f.bucket(true).join("original.json").is_file());
+    assert_eq!(
+        fs::read_to_string(f.other.join("config.json")).unwrap(),
+        format!("private-login-{OTHER}")
+    );
+    let st =
+        native_code::sharing_status(f.manager.as_ref(), f.provider.as_ref(), "second").unwrap();
+    assert!(st.enabled);
+    assert_eq!(st.participants, 2);
+    assert!(
+        native_code::add_member(f.manager.as_ref(), f.provider.as_ref(), "second", true).is_err()
+    );
+}
+
+fn third_environment(f: &Fixture) -> std::path::PathBuf {
+    let p = f
+        .manager
+        .create_profile("third", SharingConfig::share_code_preset(), None)
+        .unwrap();
+    let bucket = p
+        .isolation
+        .desktop_user_data_dir
+        .join("claude-code-sessions")
+        .join(SESSION)
+        .join(ORG);
+    fs::create_dir_all(&bucket).unwrap();
+    bucket
+}
+
+#[test]
+fn adding_member_keeps_existing_members_and_their_latest_changes() {
+    let f = Fixture::new();
+    f.enable();
+    let third = third_environment(&f);
+    fs::write(f.bucket(true).join("latest.json"), r#"{"latest":true}"#).unwrap();
+    fs::write(third.join("old.json"), r#"{"old":true}"#).unwrap();
+    native_code::add_member(f.manager.as_ref(), f.provider.as_ref(), "third", true).unwrap();
+    for bucket in [f.bucket(false), f.bucket(true), third] {
+        assert!(bucket.join("latest.json").is_file());
+        assert!(!bucket.join("old.json").exists());
+    }
+    let st =
+        native_code::sharing_status(f.manager.as_ref(), f.provider.as_ref(), "second").unwrap();
+    assert!(st.enabled);
+    assert_eq!(st.participants, 3);
+}
+
+#[test]
+fn enrollment_refuses_conflicting_existing_changes_without_seeding_new_member() {
+    let f = Fixture::new();
+    f.enable();
+    let third = third_environment(&f);
+    fs::write(f.bucket(false).join("one.json"), "{}").unwrap();
+    fs::write(f.bucket(true).join("two.json"), "{}").unwrap();
+    fs::write(third.join("keep.json"), "{}").unwrap();
+    let config = fs::read(f.provider.app_data.join("native-code.toml")).unwrap();
+    assert!(
+        native_code::add_member(f.manager.as_ref(), f.provider.as_ref(), "third", true).is_err()
+    );
+    assert_eq!(
+        fs::read(f.provider.app_data.join("native-code.toml")).unwrap(),
+        config
+    );
+    assert!(third.join("keep.json").is_file());
+    assert!(!third.join("one.json").exists());
+}
+
+#[test]
+fn enrollment_never_runs_with_desktop_or_input_state_unknown() {
+    let f = Fixture::new();
+    f.provider.set_desktop_state(true, vec![]);
+    assert!(
+        native_code::add_member(f.manager.as_ref(), f.provider.as_ref(), "second", true).is_err()
+    );
+    f.provider
+        .set_desktop_state(false, vec![(123, "Claude --user-data-dir=/another".into())]);
+    assert!(
+        native_code::add_member(f.manager.as_ref(), f.provider.as_ref(), "second", true).is_err()
+    );
+    assert!(!f.provider.app_data.join("native-code.toml").exists());
+}
+
+#[test]
 fn complete_native_records_and_worktree_state_follow_switches_without_copying_logins() {
     let f = Fixture::new();
     let name = format!("local_{SESSION}.json");

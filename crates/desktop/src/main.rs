@@ -138,6 +138,10 @@ async fn get_profile_details(
         // instances cannot race on a shared file. The UI shows the dedicated
         // "重複して起動" button only when this is true.
         "supports_concurrent_windows": !p.profile.is_default && p.sharing.is_fully_isolated(),
+        "code_sharing": csw_core::native_code::sharing_status(
+            state.profile_manager.as_ref(), state.provider.as_ref(), &name
+        ).map(|status| serde_json::json!(status))
+         .unwrap_or_else(|_| serde_json::json!({"unavailable": true})),
         "sharing": {
             "cli_settings": format!("{:?}", p.sharing.cli_settings).to_lowercase(),
             "cli_claude_md": format!("{:?}", p.sharing.cli_claude_md).to_lowercase(),
@@ -166,7 +170,7 @@ fn parse_sharing_mode(value: &str) -> Option<SharingMode> {
 /// Build the per-component sharing config for a new profile from the chosen mode preset,
 /// then apply any explicit per-component overrides coming from the "advanced settings" UI.
 fn build_sharing_config(mode: &str, overrides: Option<HashMap<String, String>>) -> SharingConfig {
-    // Three modes surfaced in the UI, framed by use case (every account belongs to
+    // Four modes surfaced in the UI, framed by use case (every account belongs to
     // the same user, so sharing is a continuity choice, not a cross-tenant leak):
     //   "isolate"         — すべて分ける: a fully separated environment, nothing
     //                       carried over (= SharingConfig::default()). For clients,
@@ -181,6 +185,7 @@ fn build_sharing_config(mode: &str, overrides: Option<HashMap<String, String>>) 
     // and device id stay isolated. "share" is a backward-compatible alias for
     // "share_settings". See SharingConfig::{share_settings,share_workspace}_preset.
     let mut sharing = match mode {
+        "share_code" => SharingConfig::share_code_preset(),
         "share_settings" | "share" => SharingConfig::share_settings_preset(),
         "share_workspace" => SharingConfig::share_workspace_preset(),
         _ => SharingConfig::default(),
@@ -249,6 +254,25 @@ async fn create_profile(
     update_tray_menu(&app)?;
 
     Ok(())
+}
+
+/// Explicit stopped-state enrollment. Paths and the existing group come from
+/// validated local profiles; the WebView cannot supply files or a seed snapshot.
+#[tauri::command]
+async fn enable_code_sharing(
+    name: String,
+    replace: bool,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let _reservation = state.launch_queue.reserve_idle().map_err(str::to_string)?;
+    csw_core::native_code::add_member(
+        state.profile_manager.as_ref(),
+        state.provider.as_ref(),
+        &name,
+        replace,
+    )
+    .map(|backup| backup.display().to_string())
+    .map_err(|e| e.to_string())
 }
 
 /// Set or clear the free-form note of an environment (empty string clears).
@@ -1102,6 +1126,7 @@ fn main() {
             list_profiles,
             get_profile_details,
             create_profile,
+            enable_code_sharing,
             delete_profile,
             purge_profile,
             clone_profile,

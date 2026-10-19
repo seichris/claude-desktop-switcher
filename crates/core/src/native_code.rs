@@ -814,6 +814,92 @@ pub fn configure(
     synchronize(manager, provider, &mut group, Some(source))
 }
 
+/// Enrollment from the GUI is additive. Preserve every existing participant and
+/// carry forward its latest changes before seeding the newly confirmed member.
+/// Unlike `configure`, this can never silently drop an existing sharing member.
+pub fn add_member(
+    manager: &ProfileManager,
+    provider: &dyn PlatformProvider,
+    name: &str,
+    replace: bool,
+) -> Result<PathBuf> {
+    if !replace {
+        return Err(refused(
+            "confirm backing up and replacing this environment's local Code stores",
+        ));
+    }
+    let _guard = lock(provider)?;
+    stopped(provider)?;
+    no_pending_launch(provider)?;
+    recover(manager, provider)?;
+    let profile = manager.get_profile(name)?;
+    let source = &profile.sharing.source.profile;
+    if name == source {
+        return Err(refused("choose a separate environment to add"));
+    }
+    let existing = load(provider)?;
+    let mut group = existing.clone().unwrap_or(Group {
+        version: 1,
+        generation: String::new(),
+        source: source.clone(),
+        members: Vec::new(),
+        fingerprints: BTreeMap::new(),
+    });
+    if group.source == name || group.members.iter().any(|n| n == name) {
+        return Err(refused(
+            "this environment already participates in local Code sharing",
+        ));
+    }
+    if group.source != *source && !group.members.contains(source) {
+        return Err(refused(
+            "the sharing source is outside the current local Code group",
+        ));
+    }
+    group.members.push(name.into());
+    // Validate all stores/links before changing the existing group at all.
+    for place in locations(manager, &group)? {
+        Store::read(&place)?;
+    }
+    if let Some(mut current) = existing {
+        synchronize(manager, provider, &mut current, None)?;
+    }
+    let authority = group.source.clone();
+    synchronize(manager, provider, &mut group, Some(&authority))
+}
+
+#[derive(Serialize)]
+pub struct SharingStatus {
+    pub enabled: bool,
+    pub eligible: bool,
+    pub source: String,
+    pub participants: usize,
+}
+
+/// Read declarations only. Do not infer sign-in state from authentication files.
+pub fn sharing_status(
+    manager: &ProfileManager,
+    provider: &dyn PlatformProvider,
+    name: &str,
+) -> Result<SharingStatus> {
+    let profile = manager.get_profile(name)?;
+    let group = load(provider)?;
+    let enabled = group
+        .as_ref()
+        .is_some_and(|g| g.source == name || g.members.iter().any(|n| n == name));
+    Ok(SharingStatus {
+        enabled,
+        eligible: name != profile.sharing.source.profile
+            && profile.sharing.cli_project_memory == crate::profile::SharingMode::Share
+            && profile.sharing.cli_history == crate::profile::SharingMode::Share,
+        source: profile.sharing.source.profile,
+        participants: if enabled {
+            group.map_or(0, |g| g.members.len() + 1)
+        } else {
+            0
+        },
+    })
+}
+
 /// Called by the existing switch flow before its active environment changes.
 pub fn before_switch(
     manager: &ProfileManager,

@@ -1,5 +1,39 @@
 # Claude Desktop Switcher
 
+
+## This fork: shared local Code by default
+
+To build this fork on macOS (Xcode command-line tools and the pinned Rust toolchain required):
+
+```sh
+git clone https://github.com/seichris/claude-desktop-switcher.git
+cd claude-desktop-switcher
+sh scripts/build-local-app.sh
+open target/release/bundle/macos/Claude-Desktop-Switcher.app
+```
+
+Create each account with the default **Share local Code** mode. It shares Code transcripts,
+project memory and input history; rules, permissions, plugins, skills and sign-ins stay
+separate. Existing environments keep their current settings. Sign in normally in Claude
+Desktop and open Code once in Existing Claude and the new environment. Finish all tasks
+and input waits, quit Claude manually, then select the new environment in Switcher and
+choose **Set up shared Code → Back up and enable sharing**. The source is Existing Claude;
+when adding another account, the sharing group's latest changes are carried forward.
+
+After that one-time setup, launch accounts through Switcher to carry **all local Code
+threads, archived/deleted records, saved repos/worktrees and Code presets** forward.
+If Claude is running, Switcher waits for you to quit it manually. It never quits or
+force-quits Claude. Existing worktree files stay in place. Cloud Chat conversations,
+cloud Projects, Desktop logins and usage quotas remain account-specific. No CLI sign-in,
+credential extraction, account-specific config template or extra network client is needed.
+Use **Separate everything** when you need independent histories instead.
+
+The build outputs include the matching `target/release/csw` CLI. Upstream release binaries
+do not contain these fork changes. See [setup and recovery](docs/USER_GUIDE_EN.md#complete-local-code-sharing-in-this-fork)
+and [local builds](docs/LOCAL_BUILD.md).
+
+---
+
 <p align="center">
   <img src="website/assets/logo.png" width="96" alt="CSW Logo">
 </p>
@@ -51,7 +85,7 @@ How should you partition your environments on a single PC? You can flexibly adju
 
 ### GUI Workflow
 
-Standard environment management is available in the settings window. This fork's optional complete local Code sharing uses the setup command documented separately above.
+Environment management and the one-time complete local Code sharing setup are available in the settings window. The CLI setup command remains available for explicit source selection and recovery.
 
 1. **Install & Launch**: Place `Claude-Desktop-Switcher.app` in your Applications folder and launch it. The settings window opens.
 2. **Create Environments**: In the settings window, create independent environments such as "Work" or "Research" with a single click.
@@ -164,7 +198,7 @@ MIT
 
 #### GUIワークフロー
 
-通常の環境管理は設定ウインドウで操作できます。このフォークの任意の追加設定であるローカルCode全体の共有には、上で案内した専用コマンドを使います。
+環境の管理とローカルCode全体の共有設定は、設定ウインドウで操作できます。共有元を明示する場合や復旧用にCLIコマンドも使えます。
 
 1. **インストール＆起動**：`Claude-Desktop-Switcher.app`をアプリケーションフォルダに入れて起動。設定ウインドウが開きます。
 2. **環境の作成**：設定ウインドウで、ワンクリックで「業務」「研究」など、独立した環境を作成。

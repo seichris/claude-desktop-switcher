@@ -174,6 +174,33 @@ async function main() {
     await evalv('acceptPendingLaunch({...pendingLaunch,error:null})');
   }
 
+  async function checkSharedCode(lang) {
+    const result = (await evalv(`(async()=>{
+      showCreate();
+      const defaults=currentMode==='share_code'&&document.querySelector('input[name="mode"]:checked')?.value==='share_code'
+        &&overrides.cli_project_memory==='share'&&overrides.cli_history==='share'&&overrides.desktop_worktrees==='copy'
+        &&['cli_settings','cli_claude_md','cli_rules','cli_plugins','cli_skills'].every(k=>overrides[k]==='isolate');
+      const name=LANG==='ja'?'研究用':'Research';
+      await showDetail(name);
+      const blocked=document.querySelector('[data-action="setup-code"]')?.disabled===true;
+      desktopRunning=false;
+      await showDetail(name);
+      const calls=DEV_CODE_CALLS.length;
+      document.querySelector('[data-action="setup-code"]').click();
+      const review=!!document.querySelector('[data-action="confirm-code"]')&&DEV_CODE_CALLS.length===calls;
+      document.querySelector('[data-action="cancel-code"]').click();
+      await new Promise(r=>setTimeout(r,80));
+      const canceled=DEV_CODE_CALLS.length===calls&&!!document.querySelector('[data-action="setup-code"]');
+      document.querySelector('[data-action="setup-code"]').click();
+      document.querySelector('[data-action="confirm-code"]').click();
+      await new Promise(r=>setTimeout(r,80));
+      const enabled=DEV_CODE_CALLS.length===calls+1&&DEV_CODE_CALLS.at(-1).name===name
+        &&DEV_CODE_CALLS.at(-1).replace===true&&!document.querySelector('[data-action="setup-code"]');
+      return {defaults,blocked,review,canceled,enabled};
+    })()`)).result?.value;
+    if (!result || Object.values(result).some(v=>v!==true)) throw new Error(`shared Code setup failed (${lang}): ${JSON.stringify(result)}`);
+  }
+
   async function checkLandingPages() {
     async function assertLayout(lang, width, menuOpen) {
       const result = (await evalv(`(()=>{
@@ -225,6 +252,7 @@ async function main() {
     await evalv(`(()=>{const s=[...document.querySelectorAll('.sharing-summary')].find(b=>${summary}.test(b.textContent));if(s&&!s.closest('.disclosure').classList.contains('open'))s.click();})()`); await sleep(400);
     await fit('detailScroll', `${prefix}screen_overview.png`);
     // create: the new-environment sheet
+    await load(lang); await checkSharedCode(lang);
     await load(lang); await evalv(`showCreate();`); await sleep(400);
     await fit('createScroll', `${prefix}screen_create.png`);
     // usage: all synthetic environments with fresh, stale and missing readings

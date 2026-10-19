@@ -165,7 +165,7 @@
                 <p class="empty-eyebrow">はじめまして</p>
               </div>
               <h1 class="empty-title">環境を分けて、混ぜない。</h1>
-              <p class="empty-lead">既存のClaudeを基準に、引き継ぐものと分けるものを選びます。ローカルCode全体の共有は、専用コマンドで有効にできます。</p>
+              <p class="empty-lead">新しい環境ではローカルCodeの共有を既定とし、ログインを分離します。初回サインイン後、詳細画面でバックアップして共有を有効にしてください。</p>
 
               <ol class="steps">
                 <li class="step"><span class="step-num">1</span><span class="step-text" data-en="Press New environment"><strong>環境を作る</strong>を押す</span></li>
@@ -256,6 +256,21 @@
                 <p class="note-card create-notice" id="createNotice" hidden></p>
                 <div class="mode-cards" role="radiogroup" aria-label="分け方">
                   <label class="mode-card">
+                    <input type="radio" name="mode" value="share_code" checked>
+                    <span class="mode-card-body">
+                      <span class="mode-card-icon"><svg class="icon"><use href="#i-link"/></svg></span>
+                      <span class="mode-card-main">
+                        <span class="mode-card-head">ローカルCodeを共有<span class="tag-recommend">推奨</span></span>
+                        <span class="mode-card-desc">Codeのスレッド・メモリ・入力履歴を引き継ぎます。初回サインイン後に、バックアップしてサイドバー・リポジトリ・プリセットの共有を有効にします。ログインとクラウドChatは別々です。共通ルール・CLI権限・スキル・プラグインは分離します。</span>
+                        <span class="mode-card-preview">
+                          <span class="prev"><span class="prev-k">Code・メモリ</span><span class="prev-v">共有</span></span>
+                          <span class="prev"><span class="prev-k">アカウント</span><span class="prev-v">分離</span></span>
+                        </span>
+                      </span>
+                      <span class="mode-card-check"><svg class="icon"><use href="#i-check"/></svg></span>
+                    </span>
+                  </label>
+                  <label class="mode-card">
                     <input type="radio" name="mode" value="share_workspace">
                     <span class="mode-card-body">
                       <span class="mode-card-icon"><svg class="icon"><use href="#i-duplicate"/></svg></span>
@@ -288,11 +303,11 @@
                   </label>
 
                   <label class="mode-card">
-                    <input type="radio" name="mode" value="isolate" checked>
+                    <input type="radio" name="mode" value="isolate">
                     <span class="mode-card-body">
                       <span class="mode-card-icon"><svg class="icon"><use href="#i-lock"/></svg></span>
                       <span class="mode-card-main">
-                        <span class="mode-card-head">すべて分ける<span class="tag-recommend">推奨</span></span>
+                        <span class="mode-card-head">すべて分ける</span>
                         <span class="mode-card-desc">ルールも設定も会話履歴もメモリも、何も引き継がずにまっさらな環境を作ります。既存のClaudeには一切触れないので、案件やクライアント、仕事と個人を完全に分けられます。</span>
                         <span class="mode-card-preview">
                           <span class="prev"><span class="prev-k">設定・会話</span><span class="prev-v">分離</span></span>
