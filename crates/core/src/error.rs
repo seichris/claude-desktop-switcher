@@ -42,6 +42,36 @@ pub enum CswError {
     )]
     DesktopRunning,
 
+    #[error("Local Code sharing: {0}")]
+    LocalCodeSharing(&'static str),
+
+    #[error("Local Code history conflict: {0}")]
+    LocalCodeConflict(&'static str),
+
+    #[error(
+        "A local Code launch remains unconfirmed. Quit Claude and explicitly reconfigure sharing."
+    )]
+    LocalCodeLaunchPending,
+
+    #[error("Could not verify Claude's process state")]
+    ProcessInspection,
+
+    #[error("Local Code recovery paused: {0}")]
+    LocalCodeRecoveryConflict(&'static str),
+
+    #[error("Claude startup could not be confirmed; the launch reservation is retained")]
+    LaunchUnconfirmed,
+
+    #[error(
+        "Claude was launched but its process state could not be verified; the reservation is retained"
+    )]
+    LaunchProcessInspection,
+
+    #[error(
+        "The operating system refused the Claude launch; check Claude before clearing its reservation"
+    )]
+    DesktopLaunchFailed,
+
     #[error("Platform not supported: {0}")]
     UnsupportedPlatform(String),
 

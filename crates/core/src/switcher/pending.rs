@@ -42,6 +42,9 @@ pub trait LaunchOperations {
     fn launch_alongside(&self, _target: &str, _identity: &str) -> Result<(), &'static str> {
         Err("alongside_refused")
     }
+    fn confirm_observed(&self, _target: &str) -> Result<(), &'static str> {
+        Ok(())
+    }
     fn activate(&self, pid: u32) -> Result<bool, &'static str>;
 }
 
@@ -273,13 +276,20 @@ impl LaunchQueue {
                 },
             )
         };
+        let inspect_confirmed = |target: &str| {
+            let state = ops.inspect(target)?;
+            if matches!(state, DesktopState::TargetRunning(_)) {
+                ops.confirm_observed(target)?;
+            }
+            Ok(state)
+        };
         let inspection = if batch_targets.is_empty() {
-            ops.inspect(&target)
+            inspect_confirmed(&target)
         } else {
             batch_targets
                 .iter()
                 .try_fold(DesktopState::TargetRunning(0), |acc, target| {
-                    let next = ops.inspect(target)?;
+                    let next = inspect_confirmed(target)?;
                     Ok(
                         if matches!(acc, DesktopState::TargetRunning(_))
                             && matches!(next, DesktopState::TargetRunning(_))
@@ -390,7 +400,7 @@ impl LaunchQueue {
                 s.status.error = Some(error);
                 // A launch error can occur after LaunchServices accepted it.
                 // Never repeat an uncertain launch, even if it isn't visible yet.
-                if error == "launch_unconfirmed" {
+                if uncertain_launch(error) {
                     s.submitted = Some(std::time::Instant::now());
                     s.committed_failure = true;
                 }
@@ -413,6 +423,29 @@ impl DesktopLaunchOperations {
         manager: std::sync::Arc<crate::profile::ProfileManager>,
     ) -> Self {
         Self { provider, manager }
+    }
+}
+
+pub fn uncertain_launch(code: &str) -> bool {
+    matches!(
+        code,
+        "launch_unconfirmed" | "launch_failed" | "launch_process_unavailable"
+    )
+}
+
+pub fn launch_error_code(error: &crate::error::CswError) -> &'static str {
+    use crate::error::CswError;
+    match error {
+        CswError::LocalCodeConflict(_) => "history_conflict",
+        CswError::LocalCodeRecoveryConflict(_) => "history_recovery_needed",
+        CswError::LocalCodeSharing(_) => "history_unavailable",
+        CswError::LocalCodeLaunchPending => "history_launch_pending",
+        CswError::ProcessInspection => "process_unavailable",
+        CswError::DesktopRunning => "desktop_reappeared",
+        CswError::DesktopLaunchFailed => "launch_failed",
+        CswError::LaunchUnconfirmed => "launch_unconfirmed",
+        CswError::LaunchProcessInspection => "launch_process_unavailable",
+        _ => "launch_refused",
     }
 }
 
@@ -487,7 +520,7 @@ impl LaunchOperations for DesktopLaunchOperations {
         }
         super::ContextSwitcher::new(self.provider.clone(), self.manager.clone())
             .switch_to(target)
-            .map_err(|_| "launch_refused")?;
+            .map_err(|e| launch_error_code(&e))?;
         let profile = self
             .manager
             .get_profile(target)
@@ -498,8 +531,8 @@ impl LaunchOperations for DesktopLaunchOperations {
         if self.validate(target)? != identity {
             return Err("target_changed");
         }
-        super::desktop::launch_desktop(&profile, self.provider.as_ref())
-            .map_err(|_| "launch_unconfirmed")
+        super::desktop::launch_desktop(&profile, self.provider.as_ref(), self.manager.as_ref())
+            .map_err(|e| launch_error_code(&e))
     }
     fn launch_alongside(&self, target: &str, identity: &str) -> Result<(), &'static str> {
         self.validate_alongside(target)?;
@@ -513,8 +546,12 @@ impl LaunchOperations for DesktopLaunchOperations {
         if self.validate(target)? != identity {
             return Err("target_changed");
         }
-        super::desktop::launch_desktop(&profile, self.provider.as_ref())
-            .map_err(|_| "launch_unconfirmed")
+        super::desktop::launch_desktop(&profile, self.provider.as_ref(), self.manager.as_ref())
+            .map_err(|e| launch_error_code(&e))
+    }
+    fn confirm_observed(&self, _target: &str) -> Result<(), &'static str> {
+        crate::native_code::ensure_confirmed_launch(self.provider.as_ref())
+            .map_err(|e| launch_error_code(&e))
     }
     fn activate(&self, pid: u32) -> Result<bool, &'static str> {
         self.provider
@@ -1044,5 +1081,92 @@ mod tests {
         );
         assert_eq!(f.launches.load(Ordering::SeqCst), 0);
         assert_eq!(f.activations.load(Ordering::SeqCst), 1);
+    }
+    #[test]
+    fn submitted_error_codes_keep_the_volatile_reservation_without_retrying() {
+        struct Failed {
+            fake: Fake,
+            code: &'static str,
+        }
+        impl LaunchOperations for Failed {
+            fn validate(&self, t: &str) -> Result<String, &'static str> {
+                self.fake.validate(t)
+            }
+            fn inspect(&self, t: &str) -> Result<DesktopState, &'static str> {
+                self.fake.inspect(t)
+            }
+            fn launch(&self, _: &str, _: &str) -> Result<(), &'static str> {
+                self.fake.launches.fetch_add(1, Ordering::SeqCst);
+                Err(self.code)
+            }
+            fn activate(&self, p: u32) -> Result<bool, &'static str> {
+                self.fake.activate(p)
+            }
+        }
+        for code in [
+            "launch_failed",
+            "launch_unconfirmed",
+            "launch_process_unavailable",
+        ] {
+            let queue = LaunchQueue::default();
+            let ops = Failed {
+                fake: Fake::new(0),
+                code,
+            };
+            let pending = queue.request("Work", &ops).unwrap();
+            let failed = queue.advance(pending.request_id, &ops).unwrap();
+            assert_eq!(failed.error, Some(code));
+            assert!(queue.is_pending().unwrap());
+            assert_eq!(queue.request("Other", &ops), Err("launch_pending"));
+            assert_eq!(queue.cancel(pending.request_id), Err("launch_committed"));
+            queue.advance(pending.request_id, &ops).unwrap();
+            assert_eq!(ops.fake.launches.load(Ordering::SeqCst), 1);
+        }
+    }
+    #[test]
+    fn visible_process_does_not_clear_a_failed_durable_confirmation() {
+        struct Uncommitted {
+            fake: Fake,
+            committed: AtomicBool,
+        }
+        impl LaunchOperations for Uncommitted {
+            fn validate(&self, t: &str) -> Result<String, &'static str> {
+                self.fake.validate(t)
+            }
+            fn inspect(&self, t: &str) -> Result<DesktopState, &'static str> {
+                self.fake.inspect(t)
+            }
+            fn launch(&self, _: &str, _: &str) -> Result<(), &'static str> {
+                Err("launch_unconfirmed")
+            }
+            fn confirm_observed(&self, _: &str) -> Result<(), &'static str> {
+                if self.committed.load(Ordering::SeqCst) {
+                    Ok(())
+                } else {
+                    Err("history_launch_pending")
+                }
+            }
+            fn activate(&self, p: u32) -> Result<bool, &'static str> {
+                self.fake.activate(p)
+            }
+        }
+        let queue = LaunchQueue::default();
+        let ops = Uncommitted {
+            fake: Fake::new(0),
+            committed: AtomicBool::new(false),
+        };
+        let r = queue.request("Work", &ops).unwrap();
+        queue.advance(r.request_id, &ops).unwrap();
+        ops.fake.target.store(true, Ordering::SeqCst);
+        let pending = queue.advance(r.request_id, &ops).unwrap();
+        assert_eq!(pending.phase, LaunchPhase::Failed);
+        assert_eq!(pending.error, Some("history_launch_pending"));
+        assert!(queue.is_pending().unwrap());
+        assert_eq!(queue.request("Other", &ops), Err("launch_pending"));
+        ops.committed.store(true, Ordering::SeqCst);
+        assert_eq!(
+            queue.advance(r.request_id, &ops).unwrap().phase,
+            LaunchPhase::Completed
+        );
     }
 }

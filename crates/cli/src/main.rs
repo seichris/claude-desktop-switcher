@@ -441,9 +441,11 @@ sign-in state) can be restored by moving the folder back under profiles/."
                     // Launch Desktop if requested and not default/disabled
                     if !no_launch && name != "default" {
                         println!("\nLaunching the Claude Desktop App in '{}'...", name.cyan());
-                        if let Err(e) =
-                            csw_core::switcher::desktop::launch_desktop(&profile, provider.as_ref())
-                        {
+                        if let Err(e) = csw_core::switcher::desktop::launch_desktop(
+                            &profile,
+                            provider.as_ref(),
+                            manager.as_ref(),
+                        ) {
                             eprintln!(
                                 "{} Failed to launch the Claude Desktop App: {}",
                                 "Warning:".yellow(),

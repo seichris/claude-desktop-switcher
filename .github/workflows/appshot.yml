@@ -48,7 +48,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Regenerate the 14 screenshots from the real UI
+      - name: Regenerate the 16 screenshots from the real UI
         run: node scripts/appshot/gen-screenshots.mjs
 
       - name: Regenerate the OG cards

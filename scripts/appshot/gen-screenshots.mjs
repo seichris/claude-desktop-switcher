@@ -273,10 +273,24 @@ async function main() {
     await crop(`${prefix}screen_pending_launch.png`, 760, 600);
     await evalv("acceptPendingLaunch({...pendingLaunch,error:'process_unavailable'})");
     await crop(`${prefix}screen_pending_recheck.png`, 760, 600);
+    // Exercise sanitized launch errors in both locales using only dev mocks.
+    const launchErrors = ['history_conflict', 'history_recovery_needed', 'history_unavailable', 'history_launch_pending', 'launch_failed', 'launch_process_unavailable', 'process_unavailable', 'launch_unconfirmed'];
+    const errorCopy = (await evalv(`(${JSON.stringify(launchErrors)}).map(code=>launchError(code))`)).result?.value;
+    if (!errorCopy || new Set(errorCopy).size !== launchErrors.length || errorCopy.some(t=>!t || t.includes('/Users/') || t.includes('@'))) throw new Error('launch error copy is missing, duplicated, or private');
+    const reopenErrors = (await evalv(`['history_conflict','process_unavailable','launch_failed'].every(code=>reopenFailureMessage({blocked:['Synthetic'],errors:{Synthetic:code}})===launchError(code))`)).result?.value;
+    if (!reopenErrors) throw new Error('Reopen dropped its specific failure reason');
+    await evalv("acceptPendingLaunch({...pendingLaunch,phase:'failed',error:'history_conflict'})");
+    for (const width of [600, 720, 760]) {
+      await cmd('Emulation.setDeviceMetricsOverride', { width, height: 600, deviceScaleFactor: 2, mobile: false });
+      await sleep(100);
+      const layout = (await evalv(`(()=>{const e=el.pendingLaunchText;return {width:innerWidth,page:document.documentElement.scrollWidth,overflow:e.scrollWidth>e.clientWidth+1,inside:el.pendingLaunchBanner.getBoundingClientRect().bottom<=innerHeight,text:e.textContent===launchError('history_conflict')};})()`)).result?.value;
+      if (!layout || layout.width !== layout.page || layout.overflow || !layout.inside || !layout.text) throw new Error(`history conflict layout failed: ${JSON.stringify(layout)}`);
+    }
+    await crop(`${prefix}screen_history_conflict.png`, 760, 600);
     // hero: the sample env, disclosures collapsed, 760x498 crop
     await load(lang); await clickEnv(env); await sleep(300);
     await crop(`${prefix}hero.png`, 760, 498);
-    done.push(`${prefix}screen_onboarding.png, ${prefix}screen_overview.png, ${prefix}screen_create.png, ${prefix}screen_usage.png, ${prefix}screen_pending_launch.png, ${prefix}screen_pending_recheck.png, ${prefix}hero.png`);
+    done.push(`${prefix}screen_onboarding.png, ${prefix}screen_overview.png, ${prefix}screen_create.png, ${prefix}screen_usage.png, ${prefix}screen_pending_launch.png, ${prefix}screen_pending_recheck.png, ${prefix}screen_history_conflict.png, ${prefix}hero.png`);
   }
 
   await checkLandingPages();
