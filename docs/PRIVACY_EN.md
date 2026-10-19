@@ -1,5 +1,10 @@
 # Privacy and Transparency
 
+New environments default to sharing local Code transcripts, memory and input history. Creation initializes only absent `projects/` and `history.jsonl` content stores, without a CLI sign-in. Full native sidebar sharing requires a separate backed-up confirmation in the app after the first Desktop sign-in. Existing environments are not migrated automatically.
+
+The content-store initialization described above is an exception to the legacy link-only behavior below: it creates missing source content stores and keeps the source directory private. It never opens authentication storage.
+
+
 This document lists everything Claude Desktop Switcher (CSW) reads, writes, and never touches on your Mac, together with the steps to verify each promise yourself. A bare "it is safe" claim gives you nothing to check, so we publish the facts and the verification steps side by side.
 
 This document is kept in sync with the implementation. Whenever the implementation changes, the same change updates this document, and a pre-release consistency check looks for any gap between the two.
@@ -9,7 +14,7 @@ This document is kept in sync with the implementation. Whenever the implementati
 1. **No internet communication.** CSW sends no usage data and performs no auto-update requests.
 2. **No reading of passwords or sign-in data.** CSW never touches the macOS Keychain that stores your passwords, and never opens the contents of sign-in tokens or browser cookies. When you duplicate an environment, sign-in files that the duplicate copies, such as the Claude Desktop App's cookies, are copied as they are, like any other file, without being opened. See "About duplicating an environment" below for details.
 3. **Limited, documented local reads.** Sharing and copying touch only the items you choose. The usage view additionally reads the Claude Desktop App's saved usage history and exact matching usage-cache responses. It does not read conversations or sign-in data to obtain usage, and never changes the existing Claude data.
-4. **Zero impact by default.** CSW rewrites no shell configuration or OS-level environment variables. Existing Claude is modified only when you explicitly enable complete local Code sharing, which replaces its Code stores while excluding sign-in storage. Launching without CSW uses the stores already present and does not synchronize them.
+4. **No shell or OS configuration changes.** Creating a shared-Code environment initializes only missing source content stores. Explicitly enabling complete local Code sharing additionally replaces the participating Desktop Code stores after backups, excluding sign-in storage. Launching without CSW uses the stores already present and does not synchronize them.
 
 ## About network access
 

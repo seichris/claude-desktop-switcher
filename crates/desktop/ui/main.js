@@ -31,6 +31,10 @@ const T = (ja, en) => (LANG === 'ja' ? ja : en);
 // rendered text exactly (trimmed). Terminology follows the shipped EN landing page
 // and the established English screenshots (Existing Claude / In use / Work etc.).
 const EN = {
+  'ローカルCodeを共有': 'Share local Code',
+  'Code・メモリ': 'Code and memory',
+  'Codeのスレッド・メモリ・入力履歴を引き継ぎます。初回サインイン後に、バックアップしてサイドバー・リポジトリ・プリセットの共有を有効にします。ログインとクラウドChatは別々です。共通ルール・CLI権限・スキル・プラグインは分離します。':
+    'Carry over Code threads, memory and input history. After the first sign-in, back up and enable shared sidebar, repos and presets. Logins and cloud Chat stay separate. Global rules, CLI permissions, skills and plugins stay isolated.',
   // Sidebar / chrome
   'Claude Desktop Switcher': 'Claude Desktop Switcher',
   '既存のClaude': 'Existing Claude',
@@ -46,8 +50,8 @@ const EN = {
   // Empty / onboarding
   'はじめまして': 'Welcome',
   '環境を分けて、混ぜない。': 'Separate environments. Never mixed.',
-  '既存のClaudeを基準に、引き継ぐものと分けるものを選びます。ローカルCode全体の共有は、専用コマンドで有効にできます。':
-    'Choose what to carry over or separate from Existing Claude. Enable complete local Code sharing separately with its setup command.',
+  '新しい環境ではローカルCodeの共有を既定とし、ログインを分離します。初回サインイン後、詳細画面でバックアップして共有を有効にしてください。':
+    'New environments default to shared local Code with separate logins. After the first sign-in, back up and enable sharing in the environment details.',
   'ログインは環境ごとに保持します': 'Sign-ins stay with each environment',
   '普段使っている環境は「既存のClaude」として保持します。ローカルCode全体の共有を明示的に有効にした場合だけCodeストアを同期し、ログインは変更しません。':
     'Your everyday setup remains Existing Claude. Only explicitly enabling complete local Code sharing synchronizes its Code stores; sign-ins stay unchanged.',
@@ -321,6 +325,12 @@ const DOCTOR_LABELS = {
 // and build_sharing_config in main.rs. config.json / claude_desktop_config.json are
 // always isolated and are not part of these maps.
 const PRESETS = {
+  share_code: {
+    ...Object.fromEntries(ALL_KEYS.map((k) => [k, 'isolate'])),
+    cli_project_memory: 'share',
+    cli_history: 'share',
+    desktop_worktrees: 'copy',
+  },
   // すべて分ける: a fully separated environment, nothing carried over.
   isolate: Object.fromEntries(ALL_KEYS.map((k) => [k, 'isolate'])),
   // 会話とメモリも分ける: reuse the common setup, keep conversation history + memory and the account separate.
@@ -355,8 +365,8 @@ let activeName = 'default';
 let desktopRunning = false; // whether any Claude Desktop is running right now
 let runningProfiles = []; // names of environments whose Claude is running (can be several)
 let selectedName = null;
-let currentMode = 'isolate';
-let overrides = { ...PRESETS.isolate };
+let currentMode = 'share_code';
+let overrides = { ...PRESETS.share_code };
 let advancedCustomized = false;
 let usageReports = null;
 let usageReadPending = false;
@@ -718,6 +728,8 @@ async function showDetail(name) {
     isInUse ? h('span', { class: 'pill pill-active', style: 'margin-left:auto', 'aria-label': '利用中', text: '利用中' }) : null);
 
   const nodes = [header];
+  const codeSharing = codeSharingSection(d);
+  if (codeSharing) nodes.push(codeSharing);
 
   if (!isDefault) {
     // The sign-in signpost comes first: it exists only during the environment's
@@ -745,7 +757,7 @@ async function showDetail(name) {
     // State first (what this environment inherits), then collapsed detail, then
     // a one-line switch hint by the action. The "利用中"/multi-window concept lives
     // in onboarding, not repeated as an always-on block here.
-    nodes.push(sharingDisclosure(d.sharing, !!d.cloned_from));
+    nodes.push(sharingDisclosure(d.sharing, !!d.cloned_from, !!d.code_sharing?.enabled));
     nodes.push(pathsSection(d, false));
     nodes.push(doctorSection(name));
     nodes.push(terminalSection(name));
@@ -760,6 +772,52 @@ async function showDetail(name) {
   el.detailContent.replaceChildren(...nodes);
   renderDetailFooter(name, isDefault, isInUse, !!d.supports_concurrent_windows);
   setView('detail');
+}
+
+function codeSharingSection(d) {
+  const status = d.code_sharing;
+  if (status?.unavailable) return section(T('ローカルCodeの共有', 'Shared local Code'), [
+    h('p', { class: 'note-card', text: T('共有の状態を確認できません。設定を変更せず、CLIで状態を確認してください。', 'Sharing status is unavailable. Leave its configuration unchanged and inspect it with the CLI.') }),
+  ]);
+  if (!status || (!status.enabled && !status.eligible)) return null;
+  if (status.enabled) {
+    return section(T('ローカルCodeの共有', 'Shared local Code'), [
+      h('p', { class: 'note-card', text: T(
+        `${status.participants}環境で有効です。Codeのスレッド・メモリ・履歴・リポジトリ・プリセットは、Claudeを手動で終了した後の切り替え時に引き継ぎます。ログインとクラウドChatは別々です。`,
+        `Enabled across ${status.participants} environments. Code threads, memory, history, repos and presets carry over when you switch after quitting Claude manually. Logins and cloud Chat remain separate.`) }),
+    ]);
+  }
+  const source = status.source === 'default' ? T('既存のClaude', 'Existing Claude') : status.source;
+  const controls = h('div', { class: 'footer-group code-sharing-controls' });
+  const canSetUp = !desktopRunning && !['waiting', 'switching'].includes(pendingLaunch.phase);
+  const setup = h('button', {
+    type: 'button', class: 'btn btn-ghost', disabled: !canSetUp, dataset: { action: 'setup-code' },
+    onclick: () => {
+      controls.replaceChildren(
+        h('p', { class: 'firstrun-body', text: T(
+          `「${d.name}」の現在のローカルCodeデータをバックアップして、「${source}」から共有を開始します。Code内に保存された権限・コネクタ参照・スケジュールタスクも含みます。既存の共有グループがあれば最新の変更を引き継ぎます。`,
+          `Back up and replace "${d.name}"'s complete local Code data using "${source}", including saved Code permissions, connector references and scheduled tasks. If sharing is already enabled, carry forward the group's latest changes first.`) }),
+        h('button', { type: 'button', class: 'btn btn-ghost', dataset: { action: 'cancel-code' }, onclick: () => showDetail(d.name) }, T('やめる', 'Cancel')),
+        h('button', { type: 'button', class: 'btn btn-primary', dataset: { action: 'confirm-code' }, onclick: async (event) => {
+          event.currentTarget.disabled = true;
+          try {
+            const backup = await invoke('enable_code_sharing', { name: d.name, replace: true });
+            await showDetail(d.name);
+            showToast(T(`共有を有効にしました。バックアップ：${backup}`, `Shared Code enabled. Backup: ${backup}`));
+          } catch (error) {
+            showToast(String(error), true);
+            await showDetail(d.name);
+          }
+        } }, T('バックアップして共有を有効にする', 'Back up and enable sharing')));
+    },
+  }, T('Codeの共有を設定', 'Set up shared Code'));
+  controls.append(setup);
+  return section(T('ローカルCodeの共有', 'Shared local Code'), [
+    h('p', { class: 'note-card', text: T(
+      'サイドバーの共有はまだ有効ではありません。両方の環境で通常どおりサインインしてCodeを一度開き、作業と入力待ちが終わってからClaudeを手動で終了し、ここで共有を有効にしてください。CLIへのサインインは不要です。',
+      'Sidebar sharing is not enabled yet. Sign in normally and open Code once in both environments. Finish all tasks and input waits, quit Claude manually, then enable sharing here. No CLI sign-in is needed.') }),
+    controls,
+  ]);
 }
 
 // Clone is a quiet, infrequent management action. It is presented as a labeled row
@@ -1219,7 +1277,10 @@ function disclosure(label, sub, innerNodes, onOpen) {
   return wrap;
 }
 
-function sharingDisclosure(sharing, cloned) {
+function sharingDisclosure(sharing, cloned, nativeCodeShared = false) {
+  // The linker copies this file at creation, but the enabled native Code group
+  // then synchronizes it at every switch. Show the resulting sharing behavior.
+  if (nativeCodeShared) sharing = { ...sharing, desktop_worktrees: 'share' };
   const shareCount = ALL_KEYS.filter((k) => sharing[k] === 'share').length;
   const copyCount = ALL_KEYS.filter((k) => sharing[k] === 'copy').length;
   const isoCount = ALL_KEYS.length - shareCount - copyCount;
@@ -1231,6 +1292,9 @@ function sharingDisclosure(sharing, cloned) {
     // Name the reference point so "shared/copied/isolated" is never ambiguous.
     h('p', { class: 'share-basis', text: '「共有」は既存のClaudeと中身を共通にすること、「コピー」は作成時に一度だけ写して以後は別々、「分離」はこの環境だけで持つことです。' }),
   ];
+  if (nativeCodeShared) inner.push(h('p', { class: 'share-basis', text: T(
+    'ワークツリー一覧は、ローカルCode全体の共有により切り替え時に同期します。',
+    'The repo/worktree list is synchronized at each switch by complete local Code sharing.') }));
   for (const g of SHARE_GROUPS) {
     inner.push(h('div', { class: 'share-group' },
       h('div', { class: 'share-group-label', text: g.label }),
@@ -1543,11 +1607,10 @@ function showCreate() {
   createIcon = '';
   renderIconPicker();
   el.nameError.hidden = true;
-  setMode('isolate');
+  setMode('share_code');
   closeAdvanced();
   renderCreateFooter();
   setView('create');
-  applyRootsStatus();
   setTimeout(() => el.inputName.focus(), 0);
 }
 
@@ -1593,10 +1656,14 @@ async function applyRootsStatus() {
     const card = input ? input.closest('.mode-card') : null;
     if (card) card.classList.toggle('is-disabled', bothAbsent);
   }
-  if (bothAbsent) setMode('isolate'); // nothing to carry over → a fully separate environment
+  // The Code default can initialize its empty local content stores without a
+  // CLI login. Existing environments and their settings are never migrated.
 
   let msg = '';
-  if (bothAbsent) {
+  if (currentMode === 'share_code') {
+    msg = T('初回サインイン後、両方の環境でCodeを開いてClaudeを手動で終了し、詳細画面の「Codeの共有を設定」でバックアップして有効にしてください。クラウドChatの会話は共有されません。',
+      'After the first sign-in, open Code in both environments and quit Claude manually. Use "Set up shared Code" in the environment details to back up and enable it. Cloud Chat conversations are not shared.');
+  } else if (bothAbsent) {
     msg = '既存のClaudeが標準の場所に見つかりません。引き継げるものが無いため、「すべて分ける」だけで作成できます。';
   } else if (!st.cli_present) {
     msg = 'Claude Code（CLI）の設定が標準の場所に見つかりません。引き継ぐモードを選んでも、ルールやスキル、会話などのCLI側は引き継がれません。';
@@ -1613,6 +1680,7 @@ function setMode(mode) {
   advancedCustomized = false;
   renderAdvancedRows();
   updateAdvancedState();
+  applyRootsStatus();
 }
 
 function renderAdvancedRows() {
@@ -1705,7 +1773,7 @@ async function submitCreate() {
     withTransition(() => showDetail(name));
     showToast(T(`「${name}」を作成しました`, `Created "${name}"`));
   } catch (e) {
-    showToast('作成できませんでした。同じ名前がすでにあるか確認してください。', true);
+    showToast(String(e), true);
     renderCreateFooter(); // restore the form footer so the user can fix and retry
   }
 }
@@ -2090,6 +2158,8 @@ document.addEventListener('DOMContentLoaded', init);
 // so flows that re-fetch details (note edit -> signpost quote) behave like the
 // real backend, which re-reads profile.toml.
 const DEV_NOTES = new Map();
+const DEV_CODE_MEMBERS = new Set();
+const DEV_CODE_CALLS = [];
 let devPending = { request_id: 0, target: null, phase: 'idle', error: null, wait_for_exit: true };
 let devRunning = ['default'];
 if (!HAS_TAURI) window.__DEV_PENDING = {
@@ -2123,7 +2193,7 @@ function devInvoke(cmd, args) {
   });
   const sample = {
     default: { name: 'default', icon: '', is_default: true, desktop_path: '~/Library/Application Support/Claude', cli_path: '~/.claude', supports_concurrent_windows: false, sharing: Object.fromEntries(ALL_KEYS.map((k) => [k, 'share'])) },
-    [NM.work]: prof(NM.work, 'briefcase', false, { ...PRESETS.share_settings },
+    [NM.work]: prof(NM.work, 'briefcase', false, { ...PRESETS.share_code },
       { note: NOTE.work, created_at: ago(24 * 40), first_launched_at: ago(24 * 40), last_launched_at: ago(3) }),
     // Launched exactly once: the sign-in signpost state, for browser QA. One
     // shared timestamp: three ago() calls could straddle a millisecond and
@@ -2136,10 +2206,25 @@ function devInvoke(cmd, args) {
     [NM.testing]: prof(NM.testing, 'flask', true, { ...PRESETS.isolate },
       { created_at: ago(2), cloned_from: NM.work }),
   };
+  for (const profile of Object.values(sample)) {
+    profile.code_sharing = { enabled: false, eligible: false, source: 'default', participants: 0 };
+  }
+  sample[NM.research].sharing = { ...PRESETS.share_code };
+  sample[NM.research].code_sharing.eligible = true;
+  sample.default.code_sharing = { enabled: true, eligible: false, source: 'default', participants: 2 };
+  sample[NM.work].code_sharing = { enabled: true, eligible: true, source: 'default', participants: 2 };
+  if (DEV_CODE_MEMBERS.has(NM.research)) {
+    sample[NM.research].code_sharing = { enabled: true, eligible: true, source: 'default', participants: 3 };
+  }
   for (const [name, note] of DEV_NOTES) {
     if (sample[name]) sample[name].note = note;
   }
   switch (cmd) {
+    case 'enable_code_sharing':
+      DEV_CODE_CALLS.push({ ...args });
+      if (!args.replace || desktopRunning || ['waiting', 'switching'].includes(pendingLaunch.phase)) return Promise.reject('Claude must be stopped and replacement confirmed');
+      DEV_CODE_MEMBERS.add(args.name);
+      return Promise.resolve('~/.context-switcher-claude/native-code-backups/synthetic-backup');
     case 'get_pending_launch': return Promise.resolve({ ...devPending });
     case 'request_environment_launch':
     case 'launch_additional_window': {

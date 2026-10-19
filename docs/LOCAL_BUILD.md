@@ -2,7 +2,7 @@
 
 This fork was reviewed against upstream version 0.24.6 at
 `5892992dead8f9596c5291d87b0259d0b494f650`. The local build has version
-`0.24.6-local.7` and bundle identifier `com.seichris.claude-desktop-switcher`.
+`0.24.6-local.8` and bundle identifier `com.seichris.claude-desktop-switcher`.
 
 The source review found no explicit runtime credential exfiltration, Keychain
 access, telemetry or automatic updater. This is limited source evidence, not a
@@ -59,8 +59,13 @@ binary, or invoke `./target/release/csw` from the checkout.
 An ad-hoc signature verifies the local bundle's consistency; it is not publisher
 identity or Apple notarization. Do not disable Gatekeeper globally.
 
-Create a **New environment** using **Separate everything** for each account and
-sign in through the official Claude app. Existing Claude remains the default.
+Create a **New environment** using the default **Share local Code** for each account and
+sign in through the official Claude app. Open Code once in both environments, finish
+all work and input waits, quit Claude manually, then select **Set up shared Code →
+Back up and enable sharing** in the new environment’s details. This is a one-time
+backed-up seed; later Switcher launches synchronize the complete Code stores.
+Rules, permissions, skills, plugins, cloud Chat and Desktop sign-ins remain separate.
+Choose **Separate everything** when you want independent Code histories. Existing Claude remains the default.
 Do not use Duplicate to add a different account: it intentionally copies Desktop
 sign-in state. Quit every Claude Desktop instance before maintenance. External
 Claude Code sessions can also write profile files; close those before maintenance.
