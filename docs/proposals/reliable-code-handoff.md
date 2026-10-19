@@ -2,6 +2,7 @@
 title: 確認済みの起動を基準にしたCode履歴の引き継ぎ
 created: 2026-10-19
 status: in-progress
+pr: 9
 ---
 
 ## 背景とゴール
