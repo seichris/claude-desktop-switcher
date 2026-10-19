@@ -757,7 +757,7 @@ async function showDetail(name) {
     // State first (what this environment inherits), then collapsed detail, then
     // a one-line switch hint by the action. The "利用中"/multi-window concept lives
     // in onboarding, not repeated as an always-on block here.
-    nodes.push(sharingDisclosure(d.sharing, !!d.cloned_from));
+    nodes.push(sharingDisclosure(d.sharing, !!d.cloned_from, !!d.code_sharing?.enabled));
     nodes.push(pathsSection(d, false));
     nodes.push(doctorSection(name));
     nodes.push(terminalSection(name));
@@ -1277,7 +1277,10 @@ function disclosure(label, sub, innerNodes, onOpen) {
   return wrap;
 }
 
-function sharingDisclosure(sharing, cloned) {
+function sharingDisclosure(sharing, cloned, nativeCodeShared = false) {
+  // The linker copies this file at creation, but the enabled native Code group
+  // then synchronizes it at every switch. Show the resulting sharing behavior.
+  if (nativeCodeShared) sharing = { ...sharing, desktop_worktrees: 'share' };
   const shareCount = ALL_KEYS.filter((k) => sharing[k] === 'share').length;
   const copyCount = ALL_KEYS.filter((k) => sharing[k] === 'copy').length;
   const isoCount = ALL_KEYS.length - shareCount - copyCount;
@@ -1289,6 +1292,9 @@ function sharingDisclosure(sharing, cloned) {
     // Name the reference point so "shared/copied/isolated" is never ambiguous.
     h('p', { class: 'share-basis', text: '「共有」は既存のClaudeと中身を共通にすること、「コピー」は作成時に一度だけ写して以後は別々、「分離」はこの環境だけで持つことです。' }),
   ];
+  if (nativeCodeShared) inner.push(h('p', { class: 'share-basis', text: T(
+    'ワークツリー一覧は、ローカルCode全体の共有により切り替え時に同期します。',
+    'The repo/worktree list is synchronized at each switch by complete local Code sharing.') }));
   for (const g of SHARE_GROUPS) {
     inner.push(h('div', { class: 'share-group' },
       h('div', { class: 'share-group-label', text: g.label }),

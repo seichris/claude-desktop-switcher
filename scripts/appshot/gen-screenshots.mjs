@@ -196,7 +196,8 @@ async function main() {
       await new Promise(r=>setTimeout(r,80));
       const enabled=DEV_CODE_CALLS.length===calls+1&&DEV_CODE_CALLS.at(-1).name===name
         &&DEV_CODE_CALLS.at(-1).replace===true&&!document.querySelector('[data-action="setup-code"]');
-      return {defaults,blocked,review,canceled,enabled};
+      const repoShared=document.querySelector('.sharing-summary')?.textContent.includes(T('共有3・分離6件','3 shared · 6 isolated'));
+      return {defaults,blocked,review,canceled,enabled,repoShared};
     })()`)).result?.value;
     if (!result || Object.values(result).some(v=>v!==true)) throw new Error(`shared Code setup failed (${lang}): ${JSON.stringify(result)}`);
   }
