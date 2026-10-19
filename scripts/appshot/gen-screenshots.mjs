@@ -128,6 +128,8 @@ async function main() {
       const duplicate=pendingLaunch.request_id===first.request_id;
       await doSwitch('Other synthetic environment');
       const replacement=pendingLaunch.target===first.target;
+      acceptPendingLaunch({...pendingLaunch,error:'process_unavailable'});
+      const rechecking=pendingLaunch.phase==='waiting'&&!el.btnCancelPendingLaunch.hidden&&el.pendingLaunchText.textContent===T('Claudeの起動状態を再確認しています。確認できるまで起動せず、予約はキャンセルできます。CSWはClaudeを終了しません。', 'Rechecking Claude’s process state. No launch will begin until it can be verified. You can cancel this reservation. CSW does not quit Claude.');
       await doCancelPendingLaunch();
       const canceled=pendingLaunch.phase==='canceled'&&getComputedStyle(el.pendingLaunchBanner).display==='none';
       await refreshPendingLaunch();
@@ -148,24 +150,28 @@ async function main() {
       acceptPendingLaunch(waiting);
       const oldIgnored=pendingLaunch.phase==='completed';
       await doSwitch(${JSON.stringify(env)});
-      return {duplicate,replacement,canceled,stayedCanceled,literal,staleIgnored,cancelHidden,committed,completed,oldIgnored,waiting:pendingLaunch.phase==='waiting'};
+      return {duplicate,replacement,rechecking,canceled,stayedCanceled,literal,staleIgnored,cancelHidden,committed,completed,oldIgnored,waiting:pendingLaunch.phase==='waiting'};
     })()`)).result?.value;
     if (!result || Object.values(result).some(v=>v!==true)) throw new Error(`pending launch flow failed: ${JSON.stringify(result)}`);
-    for (const width of [600, 720, 760]) {
-      await cmd('Emulation.setDeviceMetricsOverride', { width, height: 600, deviceScaleFactor: 2, mobile: false });
-      await sleep(100);
-      const layout = (await evalv(`(()=>{
-        const banner=el.pendingLaunchBanner;
-        const nodes=[el.pendingLaunchTarget,el.pendingLaunchText,el.btnCancelPendingLaunch];
-        return {width:innerWidth,page:document.documentElement.scrollWidth,visible:getComputedStyle(banner).display!=='none',
-          overflow:nodes.filter(e=>e.scrollWidth>e.clientWidth+1).length,
-          inside:banner.getBoundingClientRect().right<=innerWidth&&banner.getBoundingClientRect().bottom<=innerHeight,
-          buttonLines:el.btnCancelPendingLaunch.scrollHeight<=el.btnCancelPendingLaunch.clientHeight+1};
-      })()`)).result?.value;
-      if (!layout || layout.width!==layout.page || !layout.visible || layout.overflow || !layout.inside || !layout.buttonLines) {
-        throw new Error(`pending launch layout failed: ${JSON.stringify(layout)}`);
+    for (const error of [null, 'process_unavailable']) {
+      await evalv(`acceptPendingLaunch({...pendingLaunch,error:${JSON.stringify(error)}})`);
+      for (const width of [600, 720, 760]) {
+        await cmd('Emulation.setDeviceMetricsOverride', { width, height: 600, deviceScaleFactor: 2, mobile: false });
+        await sleep(100);
+        const layout = (await evalv(`(()=>{
+          const banner=el.pendingLaunchBanner;
+          const nodes=[el.pendingLaunchTarget,el.pendingLaunchText,el.btnCancelPendingLaunch];
+          return {width:innerWidth,page:document.documentElement.scrollWidth,visible:getComputedStyle(banner).display!=='none',
+            overflow:nodes.filter(e=>e.scrollWidth>e.clientWidth+1).length,
+            inside:banner.getBoundingClientRect().right<=innerWidth&&banner.getBoundingClientRect().bottom<=innerHeight,
+            buttonLines:el.btnCancelPendingLaunch.scrollHeight<=el.btnCancelPendingLaunch.clientHeight+1};
+        })()`)).result?.value;
+        if (!layout || layout.width!==layout.page || !layout.visible || layout.overflow || !layout.inside || !layout.buttonLines) {
+          throw new Error(`pending launch layout failed: ${JSON.stringify(layout)}`);
+        }
       }
     }
+    await evalv('acceptPendingLaunch({...pendingLaunch,error:null})');
   }
 
   async function checkLandingPages() {
@@ -236,10 +242,12 @@ async function main() {
     await load(lang); await clickEnv(env);
     await evalv(`doSwitch(${JSON.stringify(env)})`);
     await crop(`${prefix}screen_pending_launch.png`, 760, 600);
+    await evalv("acceptPendingLaunch({...pendingLaunch,error:'process_unavailable'})");
+    await crop(`${prefix}screen_pending_recheck.png`, 760, 600);
     // hero: the sample env, disclosures collapsed, 760x498 crop
     await load(lang); await clickEnv(env); await sleep(300);
     await crop(`${prefix}hero.png`, 760, 498);
-    done.push(`${prefix}screen_onboarding.png, ${prefix}screen_overview.png, ${prefix}screen_create.png, ${prefix}screen_usage.png, ${prefix}screen_pending_launch.png, ${prefix}hero.png`);
+    done.push(`${prefix}screen_onboarding.png, ${prefix}screen_overview.png, ${prefix}screen_create.png, ${prefix}screen_usage.png, ${prefix}screen_pending_launch.png, ${prefix}screen_pending_recheck.png, ${prefix}hero.png`);
   }
 
   await checkLandingPages();
