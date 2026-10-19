@@ -332,7 +332,7 @@ impl LaunchQueue {
             return Ok(s.status.clone());
         }
         let error = match validation {
-            Ok(current) if current == identity => inspection.as_ref().err().copied(),
+            Ok(current) if current == identity => None,
             Ok(_) => Some("target_changed"),
             Err(error) => Some(error),
         };
@@ -341,7 +341,24 @@ impl LaunchQueue {
             s.status.error = Some(error);
             return Ok(s.status.clone());
         }
-        let desktop = inspection.map_err(|_| "process_unavailable")?;
+        let desktop = match inspection {
+            Ok(desktop) => {
+                s.status.error = None;
+                desktop
+            }
+            Err("process_unavailable") => {
+                // Exiting between pgrep and ps, or between the two process
+                // snapshots, is unknown state. Keep the cancelable reservation
+                // and retry observation only; never infer that Claude stopped.
+                s.status.error = Some("process_unavailable");
+                return Ok(s.status.clone());
+            }
+            Err(error) => {
+                s.status.phase = LaunchPhase::Failed;
+                s.status.error = Some(error);
+                return Ok(s.status.clone());
+            }
+        };
         if matches!(desktop, DesktopState::Running) && !alongside {
             return Ok(s.status.clone());
         }
@@ -615,16 +632,64 @@ mod tests {
         assert_eq!(f.launches.load(Ordering::SeqCst), 0);
     }
     #[test]
-    fn inspection_failure_and_deleted_target_fail_closed() {
+    fn transient_inspection_failure_waits_then_launches_once_after_confirmed_exit() {
+        let q = LaunchQueue::default();
+        let f = Fake::new(1);
+        let r = q.request("Work", &f).unwrap();
+        f.fail.store(true, Ordering::SeqCst);
+        for _ in 0..3 {
+            let status = q.advance(r.request_id, &f).unwrap();
+            assert_eq!(status.phase, LaunchPhase::Waiting);
+            assert_eq!(status.error, Some("process_unavailable"));
+            assert_eq!(f.launches.load(Ordering::SeqCst), 0);
+            assert_eq!(f.activations.load(Ordering::SeqCst), 0);
+        }
+        assert!(q.is_pending().unwrap());
+        assert_eq!(q.request("Other", &f), Err("launch_pending"));
+        f.fail.store(false, Ordering::SeqCst);
+        let status = q.advance(r.request_id, &f).unwrap();
+        assert_eq!(status.phase, LaunchPhase::Waiting);
+        assert_eq!(status.error, None);
+        assert_eq!(f.launches.load(Ordering::SeqCst), 0);
+        f.running.store(0, Ordering::SeqCst);
+        assert_eq!(
+            q.advance(r.request_id, &f).unwrap().phase,
+            LaunchPhase::Switching
+        );
+        // An observation failure after submission must never resubmit a launch.
+        f.fail.store(true, Ordering::SeqCst);
+        for _ in 0..3 {
+            q.advance(r.request_id, &f).unwrap();
+        }
+        assert_eq!(f.launches.load(Ordering::SeqCst), 1);
+        assert_eq!(q.cancel(r.request_id), Err("launch_committed"));
+        f.fail.store(false, Ordering::SeqCst);
+        f.target.store(true, Ordering::SeqCst);
+        let status = q.advance(r.request_id, &f).unwrap();
+        assert_eq!(status.phase, LaunchPhase::Completed);
+        assert_eq!(status.error, None);
+        assert_eq!(f.launches.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn unavailable_inspection_remains_cancelable_and_revalidates_target() {
         let q = LaunchQueue::default();
         let f = Fake::new(0);
         assert_eq!(q.request("Gone", &f), Err("target_unavailable"));
         let r = q.request("Work", &f).unwrap();
         f.fail.store(true, Ordering::SeqCst);
-        assert_eq!(
-            q.advance(r.request_id, &f).unwrap().phase,
-            LaunchPhase::Failed
-        );
+        q.advance(r.request_id, &f).unwrap();
+        assert_eq!(q.cancel(r.request_id).unwrap().phase, LaunchPhase::Canceled);
+        f.fail.store(false, Ordering::SeqCst);
+        q.advance(r.request_id, &f).unwrap();
+        assert_eq!(f.launches.load(Ordering::SeqCst), 0);
+
+        let r = q.request("Work", &f).unwrap();
+        f.fail.store(true, Ordering::SeqCst);
+        f.revision.store(1, Ordering::SeqCst);
+        let status = q.advance(r.request_id, &f).unwrap();
+        assert_eq!(status.phase, LaunchPhase::Failed);
+        assert_eq!(status.error, Some("target_changed"));
         assert_eq!(f.launches.load(Ordering::SeqCst), 0);
     }
     #[test]
@@ -676,9 +741,14 @@ mod tests {
         assert!(p.launched_dirs().is_empty());
         p.set_desktop_state(false, vec![(10, "...MacOS/Claude".into())]);
         assert!(matches!(ops.inspect("Work"), Err("process_unavailable")));
-        p.set_desktop_state(false, vec![]);
         let q = LaunchQueue::default();
         let r = q.request("Work", &ops).unwrap();
+        let waiting = q.advance(r.request_id, &ops).unwrap();
+        assert_eq!(waiting.phase, LaunchPhase::Waiting);
+        assert_eq!(waiting.error, Some("process_unavailable"));
+        assert_eq!(manager.active_profile_name(), "default");
+        assert!(p.launched_dirs().is_empty());
+        p.set_desktop_state(false, vec![]);
         assert_eq!(
             q.advance(r.request_id, &ops).unwrap().phase,
             LaunchPhase::Switching

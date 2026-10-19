@@ -1378,7 +1378,9 @@ function renderPendingLaunch() {
   if (!visible) return;
   const name = (status.targets || [status.target]).map(n => n === 'default' ? T('既存のClaude', 'Existing Claude') : n).join(T('、', ', '));
   el.pendingLaunchTarget.textContent = T(`起動先：${name}`, `Launch target: ${name}`);
-  el.pendingLaunchText.textContent = status.error ? launchError(status.error)
+  el.pendingLaunchText.textContent = status.phase === 'waiting' && status.error === 'process_unavailable'
+    ? T('Claudeの起動状態を再確認しています。確認できるまで起動せず、予約はキャンセルできます。CSWはClaudeを終了しません。', 'Rechecking Claude’s process state. No launch will begin until it can be verified. You can cancel this reservation. CSW does not quit Claude.')
+    : status.error ? launchError(status.error)
     : status.phase === 'waiting' && status.wait_for_exit
       ? T('作業と質問への回答を終えて、ClaudeをCmd+Qで終了してください。すべてのClaudeが終了した後にこの環境を開きます。CSWはClaudeを終了しません。', 'Finish your work and answer pending questions, then quit Claude with Cmd+Q. This environment opens after every Claude instance has exited. CSW does not quit Claude.')
       : T('Claudeの起動を確認しています。起動要求は再送しません。', 'Confirming Claude startup. The launch request will not be repeated.');
