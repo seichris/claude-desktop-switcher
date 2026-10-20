@@ -2,7 +2,7 @@
 
 This fork was reviewed against upstream version 0.24.6 at
 `5892992dead8f9596c5291d87b0259d0b494f650`. The local build has version
-`0.24.6-local.10` and bundle identifier `com.seichris.claude-desktop-switcher`.
+`0.24.6-local.11` and bundle identifier `com.seichris.claude-desktop-switcher`.
 
 The source review found no explicit runtime credential exfiltration, Keychain
 access, telemetry or automatic updater. This is limited source evidence, not a
@@ -11,6 +11,9 @@ Claude accounts still run as the same macOS user.
 
 ## Changes before installation
 
+- Verify candidate process executable paths through macOS proc_pidpath, including
+  paths containing spaces. Concurrent inspectors and references in other programs
+  are excluded; unreadable identities fail closed.
 - Refuse duplication, deletion, purge and link repair while any Claude Desktop
   instance runs, including a secondary environment. Process-inspection errors
   propagate rather than being interpreted as no matching processes.
