@@ -121,10 +121,12 @@ impl PlatformProvider for MacOsProvider {
         // `-a` keeps pgrep's own ancestors in the match list. Run in a terminal
         // inside Claude, csw descends from that Claude, which must still count
         // as running (`csw switch` refuses while it runs).
+        // Match only the executable at the start: an unanchored pattern also
+        // matches other concurrent pgrep commands carrying that same pattern.
         let output = Command::new("/usr/bin/pgrep")
             .arg("-a")
             .arg("-f")
-            .arg("Claude.app/Contents/MacOS/Claude")
+            .arg(r"^[^[:space:]]*/Claude[.]app/Contents/MacOS/Claude([[:space:]]|$)")
             .output()?;
 
         desktop_pids_from_output(&output)
@@ -336,13 +338,19 @@ fn process_inspection_stdout<'a>(command: &str, output: &'a Output) -> Result<&'
 /// Electron spawns helper processes (`--type=renderer`, `--type=gpu-process`, …)
 /// that do not represent a running environment; only the main process carries the
 /// meaningful `--user-data-dir`. Lines that are not the Claude binary are dropped.
+fn is_claude_main_args(args: &str) -> bool {
+    args.split_whitespace()
+        .next()
+        .is_some_and(|exe| exe.ends_with("/Claude.app/Contents/MacOS/Claude"))
+        && !args.contains("--type=")
+}
+
 fn main_process_arg_lines(ps_output: &str) -> Vec<String> {
     ps_output
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty())
-        .filter(|l| l.contains("Claude.app/Contents/MacOS/Claude"))
-        .filter(|l| !l.contains("--type="))
+        .filter(|line| is_claude_main_args(line))
         .map(str::to_string)
         .collect()
 }
@@ -359,7 +367,7 @@ fn main_process_pid_lines(ps_output: &str) -> Vec<(u32, String)> {
             let (pid_str, args) = line.split_once(char::is_whitespace)?;
             let pid: u32 = pid_str.trim().parse().ok()?;
             let args = args.trim();
-            if args.contains("Claude.app/Contents/MacOS/Claude") && !args.contains("--type=") {
+            if is_claude_main_args(args) {
                 Some((pid, args.to_string()))
             } else {
                 None
@@ -558,6 +566,70 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn inspection_commands_are_not_claude_main_processes() {
+        let real = "/Applications/Claude.app/Contents/MacOS/Claude --user-data-dir=/synthetic/仕事";
+        let commands = [
+            "/usr/bin/pgrep -a -f Claude.app/Contents/MacOS/Claude",
+            "/bin/cat /Applications/Claude.app/Contents/MacOS/Claude",
+            "/Applications/ClaudeXapp/Contents/MacOS/Claude",
+            "/Applications/Claude.app/Contents/MacOS/ClaudeOther",
+            "/Applications/Claude.app/Contents/MacOS/Claude --type=renderer",
+            real,
+        ];
+        let lines = commands.join("\n");
+        assert_eq!(main_process_arg_lines(&lines), vec![real]);
+        let pid_lines = commands
+            .iter()
+            .enumerate()
+            .map(|(i, line)| format!("{} {line}", i + 1))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
+            main_process_pid_lines(&pid_lines),
+            vec![(6, real.to_string())]
+        );
+    }
+
+    #[test]
+    fn pgrep_does_not_find_another_inspection_command() {
+        const PROBE: &str = "CSW_TEST_INSPECTION_COMMAND_PROBE";
+        if std::env::var_os(PROBE).is_some() {
+            let provider = MacOsProvider::new();
+            assert!(
+                !provider
+                    .claude_desktop_pids()
+                    .unwrap()
+                    .contains(&std::process::id())
+            );
+            assert!(
+                !provider
+                    .running_desktop_processes()
+                    .unwrap()
+                    .iter()
+                    .any(|(pid, _)| *pid == std::process::id())
+            );
+            return;
+        }
+        use std::os::unix::process::CommandExt;
+        let output = Command::new(std::env::current_exe().unwrap())
+            .arg0("/nonexistent/csw-process-inspector -a -f Claude.app/Contents/MacOS/Claude")
+            .args([
+                "--exact",
+                "platform::macos::tests::pgrep_does_not_find_another_inspection_command",
+                "--test-threads=1",
+            ])
+            .env(PROBE, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "inspection probe failed: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
     }
 
     /// The parent may use the C locale, where macOS ps escapes non-ASCII
