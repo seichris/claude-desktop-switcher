@@ -113,7 +113,7 @@ CSW runs only the following four standard macOS commands. All of them are local 
 | Command | Purpose |
 |---|---|
 | `open` | Launches Claude with the selected environment's data folder, opens the fixed links in your default browser, and opens an environment's data folder in Finder |
-| `pgrep` | Checks the Claude main executable at the start of the command line, excluding concurrent inspection commands; also used while a reserved launch waits for manual quit |
+| `pgrep` | Finds candidate Claude processes; OS executable-path metadata (proc_pidpath) verifies their identity before reading their arguments, including paths with spaces; also used while a reserved launch waits for manual quit |
 | `ps` | Reads Claude process identifiers and launch arguments to identify running environments, wait for manual quit, and observe the target after launch |
 | `hdiutil` | Detects a CSW installer disk image that is still mounted and ejects it |
 

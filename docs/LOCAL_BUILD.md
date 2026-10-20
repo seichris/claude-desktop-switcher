@@ -11,8 +11,9 @@ Claude accounts still run as the same macOS user.
 
 ## Changes before installation
 
-- Match only the Claude main executable at the start of a process command.
-  Concurrent inspection commands and references in other programs are excluded.
+- Verify candidate process executable paths through macOS proc_pidpath, including
+  paths containing spaces. Concurrent inspectors and references in other programs
+  are excluded; unreadable identities fail closed.
 - Refuse duplication, deletion, purge and link repair while any Claude Desktop
   instance runs, including a secondary environment. Process-inspection errors
   propagate rather than being interpreted as no matching processes.

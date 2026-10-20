@@ -121,15 +121,22 @@ impl PlatformProvider for MacOsProvider {
         // `-a` keeps pgrep's own ancestors in the match list. Run in a terminal
         // inside Claude, csw descends from that Claude, which must still count
         // as running (`csw switch` refuses while it runs).
-        // Match only the executable at the start: an unanchored pattern also
-        // matches other concurrent pgrep commands carrying that same pattern.
+        // Literal-dot syntax also prevents this search from matching the
+        // pattern in other concurrent pgrep commands. Verify kernel executable
+        // identity next; command arguments alone are not executable identity.
         let output = Command::new("/usr/bin/pgrep")
             .arg("-a")
             .arg("-f")
-            .arg(r"^[^[:space:]]*/Claude[.]app/Contents/MacOS/Claude([[:space:]]|$)")
+            .arg(r"Claude[.]app/Contents/MacOS/Claude")
             .output()?;
 
-        desktop_pids_from_output(&output)
+        let mut verified = Vec::new();
+        for pid in desktop_pids_from_output(&output)? {
+            if claude_executable(pid)? {
+                verified.push(pid);
+            }
+        }
+        Ok(verified)
     }
 
     fn move_to_trash(&self, path: &std::path::Path) -> Result<()> {
@@ -320,6 +327,33 @@ fn desktop_processes_from_output(output: &Output) -> Result<Vec<(u32, String)>> 
     Ok(main_process_pid_lines(stdout))
 }
 
+/// Read only the OS's executable-path metadata, never process memory or env.
+fn claude_executable(pid: u32) -> Result<bool> {
+    let pid = i32::try_from(pid).map_err(|_| CswError::ProcessInspection)?;
+    let mut buffer = [0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    // SAFETY: proc_pidpath writes at most the provided buffer capacity. The PID
+    // is representable, and this exclusively owned buffer outlives the call.
+    let length =
+        unsafe { libc::proc_pidpath(pid, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
+    if length <= 0 {
+        if std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+            return Ok(false); // This candidate exited; it cannot still write.
+        }
+        return Err(CswError::ProcessInspection);
+    }
+    if length as usize >= buffer.len() {
+        return Err(CswError::ProcessInspection);
+    }
+    let path =
+        std::ffi::CStr::from_bytes_until_nul(&buffer).map_err(|_| CswError::ProcessInspection)?;
+    if path.is_empty() {
+        return Err(CswError::ProcessInspection);
+    }
+    Ok(path
+        .to_bytes()
+        .ends_with(b"/Claude.app/Contents/MacOS/Claude"))
+}
+
 fn process_inspection_stdout<'a>(command: &str, output: &'a Output) -> Result<&'a str> {
     if !output.status.success() {
         return Err(CswError::Other(format!(
@@ -339,9 +373,12 @@ fn process_inspection_stdout<'a>(command: &str, output: &'a Output) -> Result<&'
 /// that do not represent a running environment; only the main process carries the
 /// meaningful `--user-data-dir`. Lines that are not the Claude binary are dropped.
 fn is_claude_main_args(args: &str) -> bool {
-    args.split_whitespace()
-        .next()
-        .is_some_and(|exe| exe.ends_with("/Claude.app/Contents/MacOS/Claude"))
+    // Candidates have already been verified through kernel executable metadata.
+    // Do not split argv[0] on spaces: macOS ps does not quote executable paths.
+    args.starts_with('/')
+        && args
+            .split_once("/Claude.app/Contents/MacOS/Claude")
+            .is_some_and(|(_, rest)| rest.is_empty() || rest.starts_with(char::is_whitespace))
         && !args.contains("--type=")
 }
 
@@ -569,18 +606,17 @@ mod tests {
     }
 
     #[test]
-    fn inspection_commands_are_not_claude_main_processes() {
+    fn verified_main_process_arguments_preserve_executable_boundaries_and_spaces() {
         let real = "/Applications/Claude.app/Contents/MacOS/Claude --user-data-dir=/synthetic/仕事";
         let commands = [
-            "/usr/bin/pgrep -a -f Claude.app/Contents/MacOS/Claude",
-            "/bin/cat /Applications/Claude.app/Contents/MacOS/Claude",
             "/Applications/ClaudeXapp/Contents/MacOS/Claude",
             "/Applications/Claude.app/Contents/MacOS/ClaudeOther",
             "/Applications/Claude.app/Contents/MacOS/Claude --type=renderer",
             real,
+            "/Volumes/External Drive/Claude.app/Contents/MacOS/Claude --user-data-dir=/synthetic/shared",
         ];
         let lines = commands.join("\n");
-        assert_eq!(main_process_arg_lines(&lines), vec![real]);
+        assert_eq!(main_process_arg_lines(&lines), vec![real, commands[4]]);
         let pid_lines = commands
             .iter()
             .enumerate()
@@ -589,7 +625,7 @@ mod tests {
             .join("\n");
         assert_eq!(
             main_process_pid_lines(&pid_lines),
-            vec![(6, real.to_string())]
+            vec![(4, real.to_string()), (5, commands[4].to_string())]
         );
     }
 
@@ -632,6 +668,18 @@ mod tests {
         assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
     }
 
+    // Run this test harness from a synthetic executable path, never Claude.
+    // Kernel executable identity cannot be simulated by changing argv[0].
+    fn synthetic_claude_binary() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let binary = tmp
+            .path()
+            .join("External Drive/Claude.app/Contents/MacOS/Claude");
+        std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        std::fs::copy(std::env::current_exe().unwrap(), &binary).unwrap();
+        (tmp, binary)
+    }
+
     /// The parent may use the C locale, where macOS ps escapes non-ASCII
     /// arguments. Exercise the real inspection with only this test process,
     /// without creating a profile or starting Claude.
@@ -660,10 +708,9 @@ mod tests {
             return;
         }
         use std::os::unix::process::CommandExt;
-        let output = Command::new(std::env::current_exe().unwrap())
-            .arg0(format!(
-                "/nonexistent/csw-test/Claude.app/Contents/MacOS/Claude --user-data-dir={TARGET}"
-            ))
+        let (_tmp, binary) = synthetic_claude_binary();
+        let output = Command::new(&binary)
+            .arg0(format!("{} --user-data-dir={TARGET}", binary.display()))
             .args([
                 "--exact",
                 "platform::macos::tests::running_desktop_args_preserve_unicode_paths_in_c_locale",
@@ -687,9 +734,9 @@ mod tests {
     /// `csw switch` would not refuse while that Claude runs. macOS `pgrep`
     /// leaves out its own ancestors unless given `-a`.
     ///
-    /// The test runs itself again with argv[0] set to a Claude main-process
-    /// path, so the re-run is the parent of the `pgrep` it starts. Only argv[0]
-    /// changes; no file is created at that path.
+    /// The test harness runs from a synthetic Claude executable path containing
+    /// spaces. It is an ancestor of its pgrep and must still be detected. The
+    /// actual Claude application, accounts and data are never used.
     #[test]
     fn claude_desktop_pids_include_an_ancestor_claude() {
         const PROBE: &str = "CSW_TEST_ANCESTOR_CLAUDE_PROBE";
@@ -699,9 +746,8 @@ mod tests {
             assert!(pids.contains(&own), "pids {pids:?} miss the ancestor {own}");
             return;
         }
-        use std::os::unix::process::CommandExt;
-        let output = Command::new(std::env::current_exe().unwrap())
-            .arg0("/nonexistent/csw-test/Claude.app/Contents/MacOS/Claude")
+        let (_tmp, binary) = synthetic_claude_binary();
+        let output = Command::new(&binary)
             .args([
                 "--exact",
                 "platform::macos::tests::claude_desktop_pids_include_an_ancestor_claude",
