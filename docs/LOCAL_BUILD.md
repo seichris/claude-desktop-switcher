@@ -2,7 +2,7 @@
 
 This fork was reviewed against upstream version 0.24.6 at
 `5892992dead8f9596c5291d87b0259d0b494f650`. The local build has version
-`0.24.6-local.9` and bundle identifier `com.seichris.claude-desktop-switcher`.
+`0.24.6-local.10` and bundle identifier `com.seichris.claude-desktop-switcher`.
 
 The source review found no explicit runtime credential exfiltration, Keychain
 access, telemetry or automatic updater. This is limited source evidence, not a

@@ -435,6 +435,34 @@ fn cancel_pending_launch(
     Ok(status)
 }
 
+#[tauri::command]
+async fn recover_pending_code_launch(
+    request_id: u64,
+    abandon: bool,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<PendingLaunch, String> {
+    let queue = state.launch_queue.clone();
+    let manager = state.profile_manager.clone();
+    let provider = state.provider.clone();
+    let status = tauri::async_runtime::spawn_blocking(move || {
+        queue.recover_failed(request_id, || {
+            csw_core::native_code::recover_closed_launch(
+                manager.as_ref(),
+                provider.as_ref(),
+                abandon,
+            )
+            .map(|_| ())
+            .map_err(|e| csw_core::switcher::pending::launch_error_code(&e))
+        })
+    })
+    .await
+    .map_err(|_| "launch_unavailable".to_string())?
+    .map_err(str::to_string)?;
+    emit_launch_status(&app, &status);
+    Ok(status)
+}
+
 fn ensure_no_pending_launch(state: &AppState) -> Result<(), String> {
     if state.launch_queue.is_pending().map_err(str::to_string)? {
         return Err("launch_pending".into());
@@ -1134,6 +1162,7 @@ fn main() {
             request_environment_launch,
             get_pending_launch,
             cancel_pending_launch,
+            recover_pending_code_launch,
             set_profile_note,
             get_takeover_notice,
             dismiss_takeover_notice,

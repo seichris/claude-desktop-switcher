@@ -455,6 +455,7 @@ const el = {
   pendingLaunchTarget: $('pendingLaunchTarget'),
   pendingLaunchText: $('pendingLaunchText'),
   btnCancelPendingLaunch: $('btnCancelPendingLaunch'),
+  btnRecoverPendingLaunch: $('btnRecoverPendingLaunch'),
   btnDmgEject: $('btnDmgEject'),
   btnDmgLater: $('btnDmgLater'),
   takeoverBanner: $('takeoverBanner'),
@@ -1429,14 +1430,14 @@ function launchError(code) {
   if (code === 'launch_busy') return T('ほかの起動操作が進行中です。完了してから操作してください。', 'Another launch action is in progress. Wait for it to finish.');
   if (code === 'launch_pending') return T('現在の起動予約を確認してください。終了待ちの間はキャンセルできます。', 'Check the current pending launch. You can cancel while it is waiting for you to quit Claude.');
   if (code === 'launch_committed') return T('起動処理が始まったため、キャンセルできません。', 'Launching has started and can no longer be canceled.');
-  if (code === 'launch_unconfirmed') return T('Claudeの起動を確認できません。二重起動を防ぐため、再試行していません。CSWを再起動する前にClaudeの状態を確認してください。', 'Claude startup could not be confirmed. No retry was made to avoid a duplicate launch. Check Claude before restarting CSW.');
-  if (code === 'history_conflict') return T('別の環境のCode履歴にも変更があります。作業を終えてClaudeを終了し、元環境を指定して共有を再設定してください。', 'Code history has conflicting changes in another environment. Finish all work, quit Claude, then reconfigure sharing with an explicit source environment.');
+  if (code === 'launch_unconfirmed') return T('Claudeの起動を確認できません。Claudeの状態を確認し、すべて終了してから「終了後の起動予約を解除」を選んでください。起動要求は再送していません。', 'Claude startup could not be confirmed. Check Claude, quit every instance, then choose Recover closed launch. No retry was sent.');
+  if (code === 'history_conflict') return T('別の環境のCode履歴にも変更があります。作業を終えてClaudeを終了し、利用ガイドで元環境を選び直す回復手順を確認してください。未確認の起動予約が残る場合は、再設定の前に共有を解除する必要があります。', 'Code history has conflicting changes in another environment. Finish all work, quit Claude, then follow the User guide to choose a source. If an unconfirmed launch remains, disable sharing before reconfiguring it.');
   if (code === 'history_recovery_needed') return T('中断したCode履歴の引き継ぎ後に別の変更があり、復元を停止しています。バックアップと処理記録を確認してから復元してください。', 'Code history changed after an interrupted handoff. Recovery is paused. Inspect the backups and transaction journal before repairing it.');
   if (code === 'history_unavailable') return T('共有するCode履歴の検証または復元が必要なため、起動していません。共有設定とバックアップを確認してください。', 'Shared Code history needs validation or recovery. Check the sharing setup and backups before launching.');
-  if (code === 'history_launch_pending') return T('前回の起動を確認できず、Code履歴の同期を停止しています。Claudeの状態を確認し、終了後に共有を解除して元環境を指定し直してください。', 'A previous launch is unconfirmed, so Code history synchronization is blocked. Check Claude, then quit it and disable and reconfigure sharing with an explicit source.');
-  if (code === 'launch_failed') return T('Claudeの起動要求に失敗しました。Claudeの状態を確認してから、再度操作してください。共有中は起動の予約が残る場合があります。', 'The Claude launch request failed. Check Claude before trying again. A shared Code launch reservation may remain.');
+  if (code === 'history_launch_pending') return T('前回の起動を確認できず、Code履歴の同期を停止しています。Claudeを終了し、「終了後の起動予約を解除」を選んでください。履歴をバックアップして予約だけを解除します。', 'A previous launch is unconfirmed, so Code history synchronization is blocked. Quit Claude, then choose Recover closed launch. This backs up history and clears only the saved request.');
+  if (code === 'launch_failed') return T('Claudeの起動要求に失敗しました。Claudeの状態を確認し、終了してから「終了後の起動予約を解除」を選んでください。', 'The Claude launch request failed. Check Claude, then quit it before using Recover closed launch.');
   if (code === 'desktop_reappeared') return T('Claudeが再び起動したため、追加の起動要求を送りませんでした。Claudeを終了してから操作してください。', 'Claude started again before launch. Quit Claude before trying again.');
-  if (code === 'launch_process_unavailable') return T('Claudeへ起動を要求しましたが、プロセス状態を確認できません。再試行せず、Claudeの状態を確認してください。', 'Claude was asked to launch, but its process state could not be verified. Check Claude before trying again.');
+  if (code === 'launch_process_unavailable') return T('Claudeへ起動を要求しましたが、プロセス状態を確認できません。Claudeの状態を確認し、終了してから「終了後の起動予約を解除」を選んでください。', 'Claude was asked to launch, but its process state could not be verified. Check Claude, quit it, then choose Recover closed launch.');
   if (code === 'process_unavailable') return T('Claudeの起動状態を確認できません。追加の起動要求は送りません。', 'Could not verify Claude’s process state. No further launch request will be sent.');
   if (code === 'target_changed' || code === 'target_unavailable') return T('予約した環境が変更または削除されたため、起動していません。環境を確認してから予約し直してください。', 'The requested environment changed or was removed. Check it before requesting another launch.');
   return T('環境を起動できませんでした。Claudeと環境の状態を確認してください。', 'Could not launch the environment. Check Claude and the environment.');
@@ -1463,6 +1464,7 @@ function renderPendingLaunch() {
       ? T('作業と質問への回答を終えて、ClaudeをCmd+Qで終了してください。すべてのClaudeが終了した後にこの環境を開きます。CSWはClaudeを終了しません。', 'Finish your work and answer pending questions, then quit Claude with Cmd+Q. This environment opens after every Claude instance has exited. CSW does not quit Claude.')
       : T('Claudeの起動を確認しています。起動要求は再送しません。', 'Confirming Claude startup. The launch request will not be repeated.');
   el.btnCancelPendingLaunch.hidden = status.phase !== 'waiting';
+  el.btnRecoverPendingLaunch.hidden = status.phase !== 'failed' || !['history_launch_pending', 'launch_unconfirmed', 'launch_failed', 'launch_process_unavailable'].includes(status.error);
 }
 
 function acceptPendingLaunch(status) {
@@ -1497,6 +1499,25 @@ async function doCancelPendingLaunch() {
   const requestId = pendingLaunch.request_id;
   try { acceptPendingLaunch(await invoke('cancel_pending_launch', { requestId })); }
   catch (err) { showToast(launchError(String(err)), true); await refreshPendingLaunch(); }
+}
+
+let recoveryInProgress = false;
+async function doRecoverPendingLaunch() {
+  if (recoveryInProgress) return;
+  recoveryInProgress = true;
+  el.btnRecoverPendingLaunch.disabled = true;
+  const requestId = pendingLaunch.request_id;
+  try {
+    acceptPendingLaunch(await invoke('recover_pending_code_launch', { requestId, abandon: true }));
+    showToast(T('起動予約を解除しました。履歴と共有設定は維持しています。使いたい環境を選んで起動してください。', 'Saved launch cleared. History and sharing preserved. Select the environment you want to launch.'));
+    await refreshProfiles();
+  } catch (err) {
+    showToast(launchError(String(err)), true);
+    await refreshPendingLaunch();
+  } finally {
+    recoveryInProgress = false;
+    el.btnRecoverPendingLaunch.disabled = false;
+  }
 }
 
 async function doSwitch(name) {
@@ -1936,6 +1957,7 @@ async function revalidateRunning() {
 // --- Init -------------------------------------------------------------------
 function wireEvents() {
   el.btnCancelPendingLaunch.addEventListener('click', doCancelPendingLaunch);
+  el.btnRecoverPendingLaunch.addEventListener('click', doRecoverPendingLaunch);
   setInterval(refreshPendingLaunch, 1000);
   el.btnCreate.addEventListener('click', () => withTransition(showCreate));
   el.btnCreateEmpty.addEventListener('click', () => withTransition(showCreate));
@@ -2179,6 +2201,11 @@ if (!HAS_TAURI) window.__DEV_PENDING = {
     devPending = { ...devPending, phase: 'completed', error: null };
     acceptPendingLaunch({ ...devPending });
   },
+  fail(code = 'history_launch_pending') {
+    devRunning = [];
+    devPending = { ...devPending, phase: 'failed', error: code };
+    acceptPendingLaunch({ ...devPending });
+  },
   switching() { devPending = { ...devPending, phase: 'switching' }; acceptPendingLaunch({ ...devPending }); },
 };
 
@@ -2235,6 +2262,13 @@ function devInvoke(cmd, args) {
       if (!args.replace || desktopRunning || ['waiting', 'switching'].includes(pendingLaunch.phase)) return Promise.reject('Claude must be stopped and replacement confirmed');
       DEV_CODE_MEMBERS.add(args.name);
       return Promise.resolve('~/.context-switcher-claude/native-code-backups/synthetic-backup');
+    case 'recover_pending_code_launch': {
+      if (args.requestId !== devPending.request_id) return Promise.reject('launch_stale');
+      if (!args.abandon || devPending.phase !== 'failed') return Promise.reject('launch_refused');
+      if (devRunning.length) return Promise.reject('desktop_reappeared');
+      devPending = { request_id: devPending.request_id + 1, target: null, targets: [], phase: 'idle', error: null, wait_for_exit: true };
+      return Promise.resolve({ ...devPending });
+    }
     case 'get_pending_launch': return Promise.resolve({ ...devPending });
     case 'request_environment_launch':
     case 'launch_additional_window': {

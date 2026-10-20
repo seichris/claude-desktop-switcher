@@ -18,7 +18,9 @@ use crate::{
 
 mod content;
 mod launch;
-pub use launch::{LaunchGuard, ensure_confirmed_launch, finish_launch, launch_guard};
+pub use launch::{
+    LaunchGuard, ensure_confirmed_launch, finish_launch, launch_guard, recover_closed_launch,
+};
 
 const MAX_CONFIG: usize = 1024 * 1024;
 const CONFIG: &str = "native-code.toml";
