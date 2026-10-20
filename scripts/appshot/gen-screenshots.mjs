@@ -174,6 +174,39 @@ async function main() {
     await evalv('acceptPendingLaunch({...pendingLaunch,error:null})');
   }
 
+  async function checkClosedLaunchRecovery(env) {
+    await evalv(`window.__DEV_PENDING.fail(); renderPendingLaunch()`);
+    for (const width of [600, 720, 760]) {
+      await cmd('Emulation.setDeviceMetricsOverride', { width, height: 600, deviceScaleFactor: 2, mobile: false });
+      await sleep(100);
+      const layout = (await evalv(`(()=>{
+        const button=el.btnRecoverPendingLaunch, banner=el.pendingLaunchBanner;
+        return {page:document.documentElement.scrollWidth===innerWidth,
+          visible:getComputedStyle(button).display!=='none'&&button.getBoundingClientRect().height>0,
+          inside:banner.getBoundingClientRect().bottom<=innerHeight&&button.getBoundingClientRect().right<=innerWidth,
+          overflow:el.pendingLaunchText.scrollWidth>el.pendingLaunchText.clientWidth+1||button.scrollWidth>button.clientWidth+1,
+          cancelHidden:getComputedStyle(el.btnCancelPendingLaunch).display==='none'};
+      })()`)).result?.value;
+      if (!layout || !layout.page || !layout.visible || !layout.inside || layout.overflow || !layout.cancelHidden) throw new Error(`launch recovery layout failed: ${JSON.stringify(layout)}`);
+    }
+    const result = (await evalv(`(async()=>{
+      const failed={...pendingLaunch}, calls=DEV_CODE_CALLS.length;
+      const ids=devPending.request_id;
+      devRunning=['default'];
+      await doRecoverPendingLaunch();
+      const runningRefused=pendingLaunch.phase==='failed'&&devPending.request_id===ids;
+      devRunning=[];
+      await Promise.all([doRecoverPendingLaunch(),doRecoverPendingLaunch()]);
+      const idle=pendingLaunch.phase==='idle'&&pendingLaunch.request_id===ids+1;
+      acceptPendingLaunch(failed);
+      const staleIgnored=pendingLaunch.phase==='idle';
+      const preserved=DEV_CODE_CALLS.length===calls&&devRunning.length===0;
+      await doSwitch(${JSON.stringify(env)});
+      return {runningRefused,idle,staleIgnored,preserved,newRequest:pendingLaunch.phase==='waiting'&&pendingLaunch.request_id>ids+1};
+    })()`)).result?.value;
+    if (!result || Object.values(result).some(v=>v!==true)) throw new Error(`closed launch recovery failed: ${JSON.stringify(result)}`);
+  }
+
   async function checkSharedCode(lang) {
     const result = (await evalv(`(async()=>{
       showCreate();
@@ -287,10 +320,16 @@ async function main() {
       if (!layout || layout.width !== layout.page || layout.overflow || !layout.inside || !layout.text) throw new Error(`history conflict layout failed: ${JSON.stringify(layout)}`);
     }
     await crop(`${prefix}screen_history_conflict.png`, 760, 600);
+    await checkClosedLaunchRecovery(env);
+    // Capture a fresh failure banner without the QA flow's earlier toasts.
+    await load(lang); await clickEnv(env);
+    await evalv(`doSwitch(${JSON.stringify(env)})`);
+    await evalv('window.__DEV_PENDING.fail()');
+    await crop(`${prefix}screen_launch_recovery.png`, 760, 600);
     // hero: the sample env, disclosures collapsed, 760x498 crop
     await load(lang); await clickEnv(env); await sleep(300);
     await crop(`${prefix}hero.png`, 760, 498);
-    done.push(`${prefix}screen_onboarding.png, ${prefix}screen_overview.png, ${prefix}screen_create.png, ${prefix}screen_usage.png, ${prefix}screen_pending_launch.png, ${prefix}screen_pending_recheck.png, ${prefix}screen_history_conflict.png, ${prefix}hero.png`);
+    done.push(`${prefix}screen_onboarding.png, ${prefix}screen_overview.png, ${prefix}screen_create.png, ${prefix}screen_usage.png, ${prefix}screen_pending_launch.png, ${prefix}screen_pending_recheck.png, ${prefix}screen_history_conflict.png, ${prefix}screen_launch_recovery.png, ${prefix}hero.png`);
   }
 
   await checkLandingPages();

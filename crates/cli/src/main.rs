@@ -38,6 +38,14 @@ enum Commands {
     /// Stop complete local Code synchronization; preserve all data and logins.
     UnshareCode,
 
+    /// Back up and abandon an unresolved launch after quitting every Claude.
+    /// Keeps sharing, current Code stores and confirmed provenance unchanged.
+    RecoverCodeLaunch {
+        /// Explicitly abandon the old request; this does not launch Claude
+        #[arg(long, required = true)]
+        abandon: bool,
+    },
+
     /// Manage environments
     Profile {
         #[command(subcommand)]
@@ -166,6 +174,20 @@ fn main() -> anyhow::Result<()> {
     let provider: Arc<dyn csw_core::platform::PlatformProvider> = Arc::from(create_provider()?);
 
     match cli.command {
+        Commands::RecoverCodeLaunch { abandon } => {
+            let manager = ProfileManager::new(provider.clone())?;
+            match csw_core::native_code::recover_closed_launch(
+                &manager,
+                provider.as_ref(),
+                abandon,
+            )? {
+                Some(backup) => println!(
+                    "Saved launch abandoned; sharing and Code data preserved. Backup: {}",
+                    backup.display()
+                ),
+                None => println!("No saved launch to recover. Claude remains stopped."),
+            }
+        }
         Commands::UnshareCode => {
             let manager = ProfileManager::new(provider.clone())?;
             csw_core::native_code::disable(&manager, provider.as_ref())?;
@@ -742,6 +764,16 @@ Not auto-fixed to avoid losing the local copy.",
 #[cfg(test)]
 mod defaults_tests {
     use super::*;
+
+    #[test]
+    fn launch_recovery_requires_explicit_abandonment() {
+        assert!(Cli::try_parse_from(["csw", "recover-code-launch"]).is_err());
+        let cli = Cli::try_parse_from(["csw", "recover-code-launch", "--abandon"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::RecoverCodeLaunch { abandon: true }
+        ));
+    }
 
     #[test]
     fn profile_create_defaults_to_shared_code_but_isolation_remains_explicit() {

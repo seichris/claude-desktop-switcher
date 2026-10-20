@@ -69,6 +69,180 @@ impl Fixture {
 }
 
 #[test]
+fn closed_launch_recovery_backs_up_without_changing_stores_or_provenance() {
+    let f = Fixture::new();
+    f.enable();
+    let profile = f.manager.get_profile("second").unwrap();
+    drop(native_code::launch_guard(f.manager.as_ref(), f.provider.as_ref(), &profile).unwrap());
+    fs::write(f.bucket(true).join("latest.json"), r#"{"latest":true}"#).unwrap();
+    let marker = f.provider.app_data.join("native-code-launch-pending");
+    let prior_marker = fs::read(&marker).unwrap();
+    let config = fs::read(f.provider.app_data.join("native-code.toml")).unwrap();
+    assert!(
+        native_code::recover_closed_launch(f.manager.as_ref(), f.provider.as_ref(), false).is_err()
+    );
+    assert_eq!(fs::read(&marker).unwrap(), prior_marker);
+    let backup = native_code::recover_closed_launch(f.manager.as_ref(), f.provider.as_ref(), true)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        fs::read(backup.join("abandoned-launch.json")).unwrap(),
+        prior_marker
+    );
+    assert_eq!(fs::read(backup.join("native-code.toml")).unwrap(), config);
+    assert_eq!(
+        fs::read(f.provider.app_data.join("native-code.toml")).unwrap(),
+        config
+    );
+    assert!(backup.join("1/bucket/latest.json").is_file());
+    assert!(backup.join("locations.json").is_file());
+    assert!(!marker.exists());
+    assert!(!f.bucket(false).join("latest.json").exists());
+    assert!(f.bucket(true).join("latest.json").is_file());
+    assert!(code_group(&f).get("last_launch").is_none());
+    native_code::before_switch(f.manager.as_ref(), f.provider.as_ref(), "default").unwrap();
+    assert!(f.bucket(false).join("latest.json").is_file());
+    assert!(code_group(&f).get("last_launch").is_none());
+}
+
+#[test]
+fn closed_launch_recovery_refuses_ambiguous_or_unsafe_state_without_mutation() {
+    for condition in [
+        "running",
+        "args_only",
+        "inspection",
+        "journal",
+        "generation",
+        "identity",
+        "foreign",
+        "legacy",
+        "hardlink",
+        "symlink",
+    ] {
+        let f = Fixture::new();
+        f.enable();
+        let profile = f.manager.get_profile("second").unwrap();
+        drop(native_code::launch_guard(f.manager.as_ref(), f.provider.as_ref(), &profile).unwrap());
+        let marker = f.provider.app_data.join("native-code-launch-pending");
+        match condition {
+            "running" => f
+                .provider
+                .set_desktop_state(true, vec![(42, "Claude".into())]),
+            "args_only" => f
+                .provider
+                .set_desktop_state(false, vec![(42, "Claude".into())]),
+            "journal" => {
+                fs::write(f.provider.app_data.join("native-code-journal.json"), "{}").unwrap()
+            }
+            "generation" | "identity" => {
+                let mut value: serde_json::Value =
+                    serde_json::from_slice(&fs::read(&marker).unwrap()).unwrap();
+                if condition == "generation" {
+                    value["generation"] = "different".into();
+                } else {
+                    value["launch"]["identity"]["bucket"] = "/synthetic/moved".into();
+                }
+                fs::write(&marker, serde_json::to_vec(&value).unwrap()).unwrap();
+            }
+            "foreign" => {
+                fs::write(f.bucket(false).join("outside.json"), r#"{"external":true}"#).unwrap()
+            }
+            "legacy" => fs::write(&marker, "unstructured legacy reservation").unwrap(),
+            "hardlink" => {
+                fs::hard_link(&marker, f.provider.app_data.join("linked-reservation")).unwrap()
+            }
+            "symlink" => {
+                let saved = marker.with_extension("saved");
+                fs::rename(&marker, &saved).unwrap();
+                std::os::unix::fs::symlink(&saved, &marker).unwrap();
+            }
+            "inspection" => (),
+            _ => unreachable!(),
+        }
+        let config = fs::read(f.provider.app_data.join("native-code.toml")).unwrap();
+        let reservation = fs::read(&marker).unwrap();
+        let inspected = MockPlatformProvider::new(
+            f.original.clone(),
+            f.provider.cli_default.clone(),
+            f.provider.app_data.clone(),
+        )
+        .with_process_inspection_failure();
+        let provider: &dyn csw_core::platform::PlatformProvider = if condition == "inspection" {
+            &inspected
+        } else {
+            f.provider.as_ref()
+        };
+        assert!(
+            native_code::recover_closed_launch(f.manager.as_ref(), provider, true).is_err(),
+            "{condition}"
+        );
+        assert_eq!(fs::read(&marker).unwrap(), reservation, "{condition}");
+        assert_eq!(
+            fs::read(f.provider.app_data.join("native-code.toml")).unwrap(),
+            config,
+            "{condition}"
+        );
+        assert!(!f.bucket(true).join("outside.json").exists());
+        assert_eq!(
+            fs::read_to_string(f.other.join("Cookies")).unwrap(),
+            format!("private-cookie-{OTHER}")
+        );
+    }
+}
+
+#[test]
+fn closed_launch_recovery_preserves_confirmed_authority_and_refuses_unknown_writes() {
+    for unknown_writer in [false, true] {
+        let f = Fixture::new();
+        f.enable();
+        confirm_open(&f, "default");
+        let profile = f.manager.get_profile("second").unwrap();
+        drop(native_code::launch_guard(f.manager.as_ref(), f.provider.as_ref(), &profile).unwrap());
+        if unknown_writer {
+            fs::write(f.bucket(true).join("unknown.json"), "{}").unwrap();
+        } else {
+            fs::write(f.bucket(false).join("authoritative.json"), "{}").unwrap();
+        }
+        let config = fs::read(f.provider.app_data.join("native-code.toml")).unwrap();
+        let result =
+            native_code::recover_closed_launch(f.manager.as_ref(), f.provider.as_ref(), true);
+        assert_eq!(result.is_err(), unknown_writer);
+        assert_eq!(
+            fs::read(f.provider.app_data.join("native-code.toml")).unwrap(),
+            config
+        );
+        assert_eq!(
+            code_group(&f)["last_launch"]["name"].as_str(),
+            Some("default")
+        );
+        assert_eq!(
+            f.provider
+                .app_data
+                .join("native-code-launch-pending")
+                .exists(),
+            unknown_writer
+        );
+        assert!(!f.bucket(false).join("unknown.json").exists());
+        assert!(!f.bucket(true).join("authoritative.json").exists());
+    }
+}
+
+#[test]
+fn closed_launch_recovery_without_reservation_still_requires_stopped_state() {
+    let f = Fixture::new();
+    assert!(
+        native_code::recover_closed_launch(f.manager.as_ref(), f.provider.as_ref(), true)
+            .unwrap()
+            .is_none()
+    );
+    f.provider
+        .set_desktop_state(true, vec![(42, "Claude".into())]);
+    assert!(
+        native_code::recover_closed_launch(f.manager.as_ref(), f.provider.as_ref(), true).is_err()
+    );
+}
+
+#[test]
 fn default_code_preset_works_without_cli_signin_or_copying_settings() {
     let tmp = tempfile::tempdir().unwrap();
     let cli = tmp.path().join("cli");

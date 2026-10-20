@@ -112,6 +112,48 @@ impl LaunchQueue {
         ) || s.committed_failure)
     }
 
+    /// Reset only a failed request, serialized with submission and observation.
+    /// The callback must verify every writer stopped before abandoning any
+    /// durable attempt. A failure leaves this queue and its reservation intact.
+    pub fn recover_failed(
+        &self,
+        request_id: u64,
+        recover: impl FnOnce() -> Result<(), &'static str>,
+    ) -> Result<PendingLaunch, &'static str> {
+        let _execution = self.execution.try_lock().map_err(|_| "launch_busy")?;
+        let next_id = {
+            let s = self.state.lock().map_err(|_| "launch_unavailable")?;
+            if s.status.request_id != request_id {
+                return Err("launch_stale");
+            }
+            if s.status.phase != LaunchPhase::Failed {
+                return Err("launch_pending");
+            }
+            s.status
+                .request_id
+                .checked_add(1)
+                .ok_or("launch_unavailable")?
+        };
+        recover()?;
+        let mut s = self.state.lock().map_err(|_| "launch_unavailable")?;
+        *s = QueueState {
+            status: PendingLaunch {
+                request_id: next_id,
+                target: None,
+                targets: Vec::new(),
+                phase: LaunchPhase::Idle,
+                error: None,
+                wait_for_exit: true,
+            },
+            identity: String::new(),
+            submitted: None,
+            committed_failure: false,
+            alongside: false,
+            batch: false,
+        };
+        Ok(s.status.clone())
+    }
+
     /// Reserve a legacy explicit batch action against queue admission/commit.
     /// No process state is inferred by this reservation; existing launch guards
     /// still apply to every member of the batch.
@@ -1121,6 +1163,38 @@ mod tests {
             assert_eq!(queue.cancel(pending.request_id), Err("launch_committed"));
             queue.advance(pending.request_id, &ops).unwrap();
             assert_eq!(ops.fake.launches.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                queue.recover_failed(pending.request_id, || Err("desktop_reappeared")),
+                Err("desktop_reappeared")
+            );
+            assert!(queue.is_pending().unwrap());
+            let reset = queue
+                .recover_failed(pending.request_id, || {
+                    assert_eq!(queue.request("Other", &ops), Err("launch_pending"));
+                    assert_eq!(
+                        queue.recover_failed(pending.request_id, || panic!(
+                            "concurrent recovery ran"
+                        )),
+                        Err("launch_busy")
+                    );
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(reset.phase, LaunchPhase::Idle);
+            assert!(reset.request_id > pending.request_id);
+            assert!(!queue.is_pending().unwrap());
+            assert_eq!(queue.advance(pending.request_id, &ops).unwrap(), reset);
+            assert_eq!(ops.fake.launches.load(Ordering::SeqCst), 1);
+            let next = queue.request("Other", &ops).unwrap();
+            assert!(next.request_id > reset.request_id);
+            assert_eq!(
+                queue.recover_failed(pending.request_id, || panic!("stale recovery ran")),
+                Err("launch_stale")
+            );
+            assert_eq!(
+                queue.recover_failed(next.request_id, || panic!("waiting recovery ran")),
+                Err("launch_pending")
+            );
         }
     }
     #[test]
