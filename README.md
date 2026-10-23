@@ -22,7 +22,7 @@ when adding another account, the sharing group's latest changes are carried forw
 
 After that one-time setup, launch accounts through Switcher to carry **all local Code
 threads, archived/deleted records, saved repos/worktrees and Code presets** forward.
-If Claude is running, Switcher waits for you to quit it manually. It never quits or
+If Claude is running, Switcher waits for you to quit it manually. For manual switches, it never quits or
 force-quits Claude. Existing worktree files stay in place. Cloud Chat conversations,
 cloud Projects, Desktop logins and usage quotas remain account-specific. No CLI sign-in,
 credential extraction, account-specific config template or extra network client is needed.
@@ -56,6 +56,16 @@ Claude Desktop Switcher is a macOS menu bar utility for separating the whole Cla
   <img src="website/assets/hero.png" width="560" alt="Claude Desktop Switcher Settings UI">
 </p>
 
+## Return after Claude updates
+
+Enable `csw update-return on` to return to the environment that was last observed
+running alone after Claude's updater opens Existing Claude. Keep Switcher running.
+The feature verifies that the installed app changed and the restart is recent,
+requests a normal quit of that exact new instance, then hands off history and
+reopens the saved environment. Real history conflicts still stop the handoff.
+Use `csw update-return off` to disable it or `csw update-return status` to check.
+This fork's local.13 or later app and CLI are required.
+
 ## Use Cases & Solutions
 
 How should you partition your environments on a single PC? You can flexibly adjust the isolation level to suit your workflow.
@@ -76,7 +86,7 @@ How should you partition your environments on a single PC? You can flexibly adju
 
 - **Integrated Management for GUI & CLI**: Centrally manages the environments behind the Claude Desktop App and Claude Code (CLI). Switch GUI environments by selecting one; sync the CLI to the same isolated environment by running a command in a separate terminal.
 - **Customizable Isolation**: You can choose which settings to share and which data to separate based on your use case.
-- **Launch after manual quit in this fork**: Select the next environment first. If Claude Desktop is running, the local app reserves the launch and waits for you to finish work and quit every Desktop instance normally. The settings window shows the target and cancellation while waiting; CSW never requests quit or detects task completion. The reservation clears when CSW quits. No Accessibility permission or extra CLI sign-in is needed. Requires [the local app](docs/LOCAL_BUILD.md); see [the manual-quit guide](docs/USER_GUIDE_EN.md#launch-after-you-quit-claude).
+- **Launch after manual quit in this fork**: Select the next environment first. If Claude Desktop is running, the local app reserves the launch and waits for you to finish work and quit every Desktop instance normally. The settings window shows the target and cancellation while waiting; Manual switches never request quit or detect task completion. The reservation clears when CSW quits. No Accessibility permission or extra CLI sign-in is needed. Requires [the local app](docs/LOCAL_BUILD.md); see [the manual-quit guide](docs/USER_GUIDE_EN.md#launch-after-you-quit-claude).
 - **Saved Claude usage in this fork**: Local builds show each discovered environment's saved usage percentages, available resets, and last-checked time. Stale and missing data are explicit. The reader uses only existing Desktop usage files and matching local cache responses, with no network requests or credential access. This addition is not part of the upstream downloads linked above; see [the local-cache guide](docs/USER_GUIDE_EN.md#checking-saved-claude-usage).
 - **Complete local Code sharing in this fork**: Explicitly synchronize the full local Desktop Code sidebar, worktree bookkeeping and saved presets between environments, keeping Desktop sign-ins separate. Synchronization runs before a participating launch with Claude stopped, after backups, without a CLI login. Disable it with `csw unshare-code`; current data and logins remain. This addition requires [the local app and CLI](docs/LOCAL_BUILD.md), rather than the upstream downloads. See the [sharing guide](docs/USER_GUIDE_EN.md#complete-local-code-sharing-in-this-fork).
 - **Zero-Impact Isolation**: It does not arbitrarily overwrite your Mac's global system settings. Settings are applied locally only to the apps or specific terminal tabs launched by this tool. Existing Claude is preserved by default. Explicitly enabling complete local Code sharing additionally replaces its Code stores, while leaving sign-in storage separate.
@@ -185,11 +195,15 @@ MIT
 - **04. GUIの分離にCLIを連動させる（開発者向け）**
   GUIで分けた環境をClaude Code（CLI）側でも同じ環境で使いたい場合に。GUIで選んだ環境に`CLAUDE_CONFIG_DIR`を連動させ、別に開いたターミナルで`eval $(csw env <環境名>)`（`<環境名>`は対象の環境名に置き換え）を実行すれば、CLIもその隔離環境で動きます。CLI単体スイッチャーが既に解決している領域に、GUI分離との一貫性を足します。
 
+### Claudeの更新後に元の環境へ戻す
+
+このforkのローカル版local.13以降のアプリとCLIで`csw update-return on`を実行し、CSWを起動したままにしてください。単独で利用中だった環境の終了、アプリの入れ替え、新しい既存のClaudeの起動を確認した場合、対象に通常終了を要求し、履歴を引き継いで元の環境へ戻します。履歴が競合した場合は停止します。無効化は`csw update-return off`、設定の確認は`csw update-return status`です。
+
 ### アプリの特徴
 
 - **GUIとCLIの統合環境管理**：ClaudeデスクトップアプリとClaude Code（CLI）の背後の環境を一元管理します。GUIの環境を選んで切り替えるほか、別に開いたターミナルでコマンドを実行すれば、CLIも同じ隔離環境へ同期できます。
 - **分離度のカスタマイズ**：共有したい設定と分けたいデータを用途に合わせて選択可能です。
-- **このフォークの手動終了後の起動**：先に次の環境を選びます。Claude Desktopが起動中なら、ローカルアプリが起動を予約し、作業を終えてすべてのDesktopを通常終了するまで待ちます。待機中は設定ウインドウに予約先とキャンセルを表示します。CSWは終了要求や作業の完了判定を行いません。CSWを終了すると予約は消えます。Accessibilityの許可や追加のCLIログインは不要です。[ローカルアプリ](docs/LOCAL_BUILD.md)が必要です。[手動終了後の起動のガイド](docs/USER_GUIDE.md#claudeを終了してから予約した環境を開く)を参照してください。
+- **このフォークの手動終了後の起動**：先に次の環境を選びます。Claude Desktopが起動中なら、ローカルアプリが起動を予約し、作業を終えてすべてのDesktopを通常終了するまで待ちます。待機中は設定ウインドウに予約先とキャンセルを表示します。手動の起動予約ではCSWは終了要求や作業の完了判定を行いません。CSWを終了すると予約は消えます。Accessibilityの許可や追加のCLIログインは不要です。[ローカルアプリ](docs/LOCAL_BUILD.md)が必要です。[手動終了後の起動のガイド](docs/USER_GUIDE.md#claudeを終了してから予約した環境を開く)を参照してください。
 - **このフォークで保存済みのClaudeの利用量を表示**：ローカルビルドでは、見つかった各環境の使用率、記録にあるリセット時刻、最終確認時刻を表示し、古い記録と未取得を明示します。既存のDesktopの利用量ファイルと対応するローカルキャッシュだけを読み、通信や認証情報の読み取りは行いません。この追加機能は、上で案内している上流の配布版には含まれません。[ローカル記録のガイド](docs/USER_GUIDE.md#保存済みのclaudeの利用量を確認する)を参照してください。
 - **このフォークでローカルCode全体を共有**：DesktopのローカルCodeサイドバー、ワークツリーの管理情報、保存済みのCodeプリセットを、ログインを分離したまま明示的に同期できます。全Claudeの終了とバックアップ後、参加環境の起動前に同期し、CLIへのログインは追加しません。`csw unshare-code`で無効にしても、現在のデータとログインは維持します。上流の配布版ではなく、[ローカルのアプリとCLI](docs/LOCAL_BUILD.md)が必要です。[共有のガイド](docs/USER_GUIDE.md#このフォークでローカルcode全体を共有する)を参照してください。
 - **局所的な環境の適用 (Zero-Impact Isolation)**：Mac本体のシステム設定を無差別に上書きすることはありません。設定は本ツールから起動したアプリや特定のターミナルタブに対してのみ局所的に適用されます。既定では既存のClaudeを維持します。ローカルCode全体の共有を明示的に有効にした場合はCodeストアも置き換え、サインイン情報は分離して保持します。

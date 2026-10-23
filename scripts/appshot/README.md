@@ -25,7 +25,7 @@ node scripts/appshot/gen-screenshots.mjs
 gh workflow run appshot.yml -f branch=<PRのブランチ>
 ```
 
-ワークフローは18枚を撮り直し、差分があればbotのコミットとしてそのブランチへpushする。botがpushすると、PRのCIのrunは承認待ちで止まる。その後に空のコミットをpushして、必須チェックを走らせる。
+ワークフローは20枚を撮り直し、差分があればbotのコミットとしてそのブランチへpushする。botがpushすると、PRのCIのrunは承認待ちで止まる。その後に空のコミットをpushして、必須チェックを走らせる。
 
 手元のMacで撮った画像は、出荷する画像に使わない。2026年10月に手元のMacのChrome 154で撮ると、ChromeはコードをOsaka-Monoで描いた。UIはコードの書体に4つの候補を指定している。このChromeは、`ui-monospace`と`SF Mono`と`JetBrains Mono`を解決できず、最後の総称の`monospace`に落ちた。そのため手元の画像では、ランナーの画像よりコードの字が小さく見え、字の形も違う。手元で撮るのは、変更が画面にどう写るかを下見するときだけにする。
 
@@ -55,3 +55,5 @@ UI は OS/ブラウザのロケールで日英を判定し、撮影時は `?lang
 Code履歴の競合表示も日英で撮影し、競合・復元停止・プロセス検査・起動失敗の文言が区別できることをdevモックで検証する。
 
 未確認起動の回復表示も日英で撮影し、実行中の拒否、バックアップ付き解除後の待機状態、古いイベントの無視、起動の自動再送がないことをdevモックで検証する。
+
+`screen_update_return.png`と`ja_screen_update_return.png`は、更新後の通常終了を待つ表示とキャンセルをdevモックで検証します。実際のClaudeには終了要求を送りません。ローカルの下見には`CSW_APPSHOT_BROWSER`でブラウザの実行ファイル、`CSW_APPSHOT_OUT`で出力先を指定できます。

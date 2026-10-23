@@ -1064,6 +1064,7 @@ fn main() {
                 let mut takeover_watch = csw_core::switcher::takeover::TakeoverWatch::new(
                     std::time::Duration::from_secs(12),
                 );
+                let mut update_return = csw_core::update_return::UpdateReturnWatch::default();
                 let mut prev_names: Vec<String> = Vec::new();
                 let mut prev_unmanaged = false;
                 // High-water union of environments seen running together since
@@ -1075,16 +1076,58 @@ fn main() {
                     let state = watch_handle.state::<AppState>();
                     // One process snapshot per tick: unmanaged and names must
                     // come from the same view of the world.
-                    let processes = state
-                        .provider
-                        .running_desktop_processes()
-                        .unwrap_or_default();
+                    let Ok(processes) = state.provider.running_desktop_processes() else {
+                        update_return.reset();
+                        continue;
+                    };
                     let args: Vec<String> =
                         processes.iter().map(|(_, line)| line.clone()).collect();
                     let unmanaged_pids = csw_core::switcher::takeover::unmanaged_pids(&processes);
                     let unmanaged = !unmanaged_pids.is_empty();
                     let names = running_profile_names_from(&state, &args);
                     let now = std::time::Instant::now();
+                    if csw_core::update_return::enabled(&state.provider.app_data_dir())
+                        .unwrap_or(false)
+                        && let Ok(revision) = state.provider.desktop_app_revision()
+                    {
+                        let identity =
+                            if processes.len() == 1 && names.len() == 1 && names[0] != "default" {
+                                state.launch_operations.validate(&names[0]).ok()
+                            } else {
+                                None
+                            };
+                        let named = names
+                            .first()
+                            .zip(identity.as_deref())
+                            .map(|(name, identity)| (name.as_str(), identity));
+                        if let Some(plan) = update_return.observe(now, &processes, named, &revision)
+                        {
+                            let status = state.launch_queue.request_prepared(
+                                &plan.target,
+                                &plan.identity,
+                                state.launch_operations.as_ref(),
+                                || {
+                                    if !csw_core::update_return::enabled(
+                                        &state.provider.app_data_dir(),
+                                    )
+                                    .unwrap_or(false)
+                                    {
+                                        return Err("update_return_disabled");
+                                    }
+                                    state
+                                        .provider
+                                        .quit_update_restart(plan.pid, &plan.revision)
+                                        .map_err(|_| "update_return_quit_refused")
+                                },
+                            );
+                            match status {
+                                Ok(status) => emit_launch_status(&watch_handle, &status),
+                                Err(code) => eprintln!("Automatic update return paused: {code}"),
+                            }
+                        }
+                    } else {
+                        update_return.reset();
+                    }
 
                     // Record the reopen set. Accumulate everything seen open in
                     // this session; when all Claude have quit, freeze the union

@@ -250,6 +250,10 @@
             </div>
             <div class="faq-grid">
                 <div class="faq-item">
+                    <p class="faq-q">Can it return to my environment after a Claude update?</p>
+                    <p class="faq-a">This fork’s local.13 or later app and CLI support <code>csw update-return on</code>. Keep Switcher running. When it observes the prior environment close, the installed app change, and a new Existing Claude instance appear within 90 seconds, it requests normal quit of that exact instance and reopens the prior environment through the usual history handoff. Real history conflicts stop recovery. Normal launches with an unchanged app are unaffected. Use <code>csw update-return off</code> to disable it.</p>
+                </div>
+                <div class="faq-item">
                     <p class="faq-q">"Shared" or "Isolated": relative to what?</p>
                     <p class="faq-a">Always relative to Existing Claude, the setup you already use. Using the same thing as your existing Claude is called "Shared", and keeping a new one just for this environment is called "Isolated". You choose one or the other for each item. Whatever you choose, the account is always separate for each environment.</p>
                 </div>
@@ -283,7 +287,7 @@
                 </div>
                 <div class="faq-item">
                     <p class="faq-q">Can I choose the next environment before quitting Claude?</p>
-                    <p class="faq-a">Yes, in this fork’s local app. Press the target’s launch button while another Claude Desktop is running; CSW shows the reserved environment and Cancel while waiting. Finish work and answer pending questions, then quit every Claude Desktop instance normally with Cmd+Q. Closing a window may not exit the app. CSW then runs the normal stopped-state synchronization and launch. CSW never requests quit or detects task completion, and needs no Accessibility permission, extra CLI sign-in or network access. Only one launch can wait; cancel it before choosing another target. Restarting CSW clears it. This is not included in upstream downloads. See the <a href="https://github.com/seichris/claude-desktop-switcher/blob/main/docs/USER_GUIDE_EN.md#launch-after-you-quit-claude" target="_blank" rel="noopener">manual-quit guide</a>.</p>
+                    <p class="faq-a">Yes, in this fork’s local app. Press the target’s launch button while another Claude Desktop is running; CSW shows the reserved environment and Cancel while waiting. Finish work and answer pending questions, then quit every Claude Desktop instance normally with Cmd+Q. Closing a window may not exit the app. CSW then runs the normal stopped-state synchronization and launch. Manual launch requests never request quit or detect task completion, and needs no Accessibility permission, extra CLI sign-in or network access. Only one launch can wait; cancel it before choosing another target. Restarting CSW clears it. This is not included in upstream downloads. See the <a href="https://github.com/seichris/claude-desktop-switcher/blob/main/docs/USER_GUIDE_EN.md#launch-after-you-quit-claude" target="_blank" rel="noopener">manual-quit guide</a>.</p>
                 </div>
                 <div class="faq-item">
                     <p class="faq-q">Can I open more than one environment at the same time?</p>

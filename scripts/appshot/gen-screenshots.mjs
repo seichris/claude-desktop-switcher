@@ -28,7 +28,7 @@ const UI = path.join(REPO, 'crates', 'desktop', 'ui');
 const WEBSITE = path.join(REPO, 'website');
 const OUT = process.env.CSW_APPSHOT_OUT || path.join(REPO, 'website', 'assets');
 fs.mkdirSync(OUT, { recursive: true });
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const CHROME = process.env.CSW_APPSHOT_BROWSER || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PORT = 8191, DP = 9341;
 // The footer version is left out of the screenshots on purpose: without ?appver=
 // the dev mock hides it. Screenshots are regenerated in feature PRs, before
@@ -306,6 +306,10 @@ async function main() {
     await crop(`${prefix}screen_pending_launch.png`, 760, 600);
     await evalv("acceptPendingLaunch({...pendingLaunch,error:'process_unavailable'})");
     await crop(`${prefix}screen_pending_recheck.png`, 760, 600);
+    await evalv("acceptPendingLaunch({...pendingLaunch,automatic_return:true,error:null})");
+    const automaticCopy = (await evalv(`(()=>{const e=el.pendingLaunchText;return {text:e.textContent,overflow:e.scrollWidth>e.clientWidth+1,cancel:!el.btnCancelPendingLaunch.hidden};})()`)).result?.value;
+    if (!automaticCopy || automaticCopy.overflow || !automaticCopy.cancel || !automaticCopy.text.includes(lang === 'ja' ? '更新' : 'update') || automaticCopy.text.includes('Cmd+Q')) throw new Error(`automatic update return copy failed: ${JSON.stringify(automaticCopy)}`);
+    await crop(`${prefix}screen_update_return.png`, 760, 600);
     // Exercise sanitized launch errors in both locales using only dev mocks.
     const launchErrors = ['history_conflict', 'history_recovery_needed', 'history_unavailable', 'history_launch_pending', 'launch_failed', 'launch_process_unavailable', 'process_unavailable', 'launch_unconfirmed'];
     const errorCopy = (await evalv(`(${JSON.stringify(launchErrors)}).map(code=>launchError(code))`)).result?.value;
@@ -329,7 +333,7 @@ async function main() {
     // hero: the sample env, disclosures collapsed, 760x498 crop
     await load(lang); await clickEnv(env); await sleep(300);
     await crop(`${prefix}hero.png`, 760, 498);
-    done.push(`${prefix}screen_onboarding.png, ${prefix}screen_overview.png, ${prefix}screen_create.png, ${prefix}screen_usage.png, ${prefix}screen_pending_launch.png, ${prefix}screen_pending_recheck.png, ${prefix}screen_history_conflict.png, ${prefix}screen_launch_recovery.png, ${prefix}hero.png`);
+    done.push(`${prefix}screen_onboarding.png, ${prefix}screen_overview.png, ${prefix}screen_create.png, ${prefix}screen_usage.png, ${prefix}screen_pending_launch.png, ${prefix}screen_pending_recheck.png, ${prefix}screen_update_return.png, ${prefix}screen_history_conflict.png, ${prefix}screen_launch_recovery.png, ${prefix}hero.png`);
   }
 
   await checkLandingPages();

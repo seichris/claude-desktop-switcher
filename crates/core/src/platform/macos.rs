@@ -210,6 +210,53 @@ impl PlatformProvider for MacOsProvider {
         }
     }
 
+    fn desktop_app_revision(&self) -> Result<String> {
+        use std::os::unix::fs::MetadataExt;
+        let path = self.claude_desktop_app_path().join("Contents/MacOS/Claude");
+        let meta = std::fs::symlink_metadata(path)?;
+        if !meta.is_file() {
+            return Err(CswError::ProcessInspection);
+        }
+        Ok(format!(
+            "{}:{}:{}:{}:{}",
+            meta.dev(),
+            meta.ino(),
+            meta.len(),
+            meta.mtime(),
+            meta.mtime_nsec()
+        ))
+    }
+
+    fn quit_update_restart(&self, pid: u32, revision: &str) -> Result<()> {
+        use objc2_app_kit::NSRunningApplication;
+        let native_pid = i32::try_from(pid).map_err(|_| CswError::ProcessInspection)?;
+        let app = NSRunningApplication::runningApplicationWithProcessIdentifier(native_pid)
+            .ok_or(CswError::ProcessInspection)?;
+        let expected = self.claude_desktop_app_path().join("Contents/MacOS/Claude");
+        let object_executable = app
+            .executableURL()
+            .and_then(|url| url.path())
+            .map(|path| PathBuf::from(path.to_string()));
+        let processes = self.running_desktop_processes()?;
+        if pid == 0
+            || pid > i32::MAX as u32
+            || !self.is_claude_desktop_running()?
+            || self.desktop_app_revision()? != revision
+            || app.isTerminated()
+            || object_executable.as_deref() != Some(expected.as_path())
+            || process_executable_path(pid)?.as_deref() != Some(expected.as_path())
+            || !matches!(processes.as_slice(), [(candidate, args)] if *candidate == pid && !args.contains("--user-data-dir"))
+        {
+            return Err(CswError::ProcessInspection);
+        }
+        // Normal application termination may be refused or deferred. The
+        // existing queue waits for verified process exit; never force it.
+        if !app.terminate() {
+            return Err(CswError::Other("Claude declined normal quit".into()));
+        }
+        Ok(())
+    }
+
     fn frontmost_app(&self) -> Result<super::FrontmostApp> {
         // Only the application's PID is read; window titles and contents are
         // never touched. Called from an explicit user action (tray item).
@@ -328,7 +375,8 @@ fn desktop_processes_from_output(output: &Output) -> Result<Vec<(u32, String)>> 
 }
 
 /// Read only the OS's executable-path metadata, never process memory or env.
-fn claude_executable(pid: u32) -> Result<bool> {
+fn process_executable_path(pid: u32) -> Result<Option<PathBuf>> {
+    use std::os::unix::ffi::OsStrExt;
     let pid = i32::try_from(pid).map_err(|_| CswError::ProcessInspection)?;
     let mut buffer = [0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
     // SAFETY: proc_pidpath writes at most the provided buffer capacity. The PID
@@ -337,7 +385,7 @@ fn claude_executable(pid: u32) -> Result<bool> {
         unsafe { libc::proc_pidpath(pid, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
     if length <= 0 {
         if std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
-            return Ok(false); // This candidate exited; it cannot still write.
+            return Ok(None); // This candidate exited; it cannot still write.
         }
         return Err(CswError::ProcessInspection);
     }
@@ -349,9 +397,18 @@ fn claude_executable(pid: u32) -> Result<bool> {
     if path.is_empty() {
         return Err(CswError::ProcessInspection);
     }
-    Ok(path
-        .to_bytes()
-        .ends_with(b"/Claude.app/Contents/MacOS/Claude"))
+    Ok(Some(PathBuf::from(std::ffi::OsStr::from_bytes(
+        path.to_bytes(),
+    ))))
+}
+
+fn claude_executable(pid: u32) -> Result<bool> {
+    use std::os::unix::ffi::OsStrExt;
+    Ok(process_executable_path(pid)?.is_some_and(|path| {
+        path.as_os_str()
+            .as_bytes()
+            .ends_with(b"/Claude.app/Contents/MacOS/Claude")
+    }))
 }
 
 fn process_inspection_stdout<'a>(command: &str, output: &'a Output) -> Result<&'a str> {

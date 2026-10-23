@@ -924,6 +924,141 @@ fn confirmed_launch_beats_active_marker_focus_and_known_stale_destination() {
     assert!(f.bucket(true).join("deleted_thread").exists());
 }
 
+fn quit_marker_session(title: &str) -> serde_json::Value {
+    serde_json::json!({
+        "title": title,
+        "armedWorkAtQuit": {
+            "at": 100,
+            "exitKind": "update_restart",
+            "cronCount": 0,
+            "durableCronCount": 0,
+            "backgroundTaskCount": 1
+        }
+    })
+}
+
+#[test]
+fn updater_restart_consuming_quit_markers_preserves_latest_confirmed_history() {
+    for (authority, exit_kind) in [(false, "quit"), (true, "update_restart")] {
+        let f = Fixture::new();
+        let name = format!("local_{SESSION}.json");
+        let mut old = quit_marker_session("old");
+        old["armedWorkAtQuit"]["exitKind"] = exit_kind.into();
+        fs::write(
+            f.bucket(false).join(&name),
+            serde_json::to_vec(&old).unwrap(),
+        )
+        .unwrap();
+        fs::write(f.bucket(false).join("deleted-later.json"), "{}").unwrap();
+        fs::write(
+            f.original.join("ccd-session-presets.json"),
+            serde_json::to_vec(&serde_json::json!({"byAccount": {ACCOUNT: {"presets": ["keep"]}}}))
+                .unwrap(),
+        )
+        .unwrap();
+        f.enable();
+        let active = if authority { "second" } else { "default" };
+        confirm_open(&f, active);
+        let mut stale = old;
+        stale.as_object_mut().unwrap().remove("armedWorkAtQuit");
+        fs::write(
+            f.bucket(!authority).join(&name),
+            serde_json::to_vec(&stale).unwrap(),
+        )
+        .unwrap();
+        let latest = serde_json::to_vec(&quit_marker_session("latest")).unwrap();
+        fs::write(f.bucket(authority).join(&name), &latest).unwrap();
+        fs::write(f.bucket(authority).join("new-thread.json"), "{}").unwrap();
+        fs::remove_file(f.bucket(authority).join("deleted-later.json")).unwrap();
+        native_code::before_switch(f.manager.as_ref(), f.provider.as_ref(), active).unwrap();
+        assert_eq!(fs::read(f.bucket(false).join(&name)).unwrap(), latest);
+        assert_eq!(fs::read(f.bucket(true).join(&name)).unwrap(), latest);
+        assert!(f.bucket(!authority).join("new-thread.json").exists());
+        assert!(!f.bucket(!authority).join("deleted-later.json").exists());
+        assert_eq!(code_group(&f)["last_launch"]["name"].as_str(), Some(active));
+    }
+}
+
+#[test]
+fn quit_marker_recovery_refuses_content_edits_unrecognized_markers_and_unverified_snapshots() {
+    for condition in [
+        "title",
+        "nested",
+        "unknown_marker_field",
+        "invalid_marker",
+        "replaced_marker",
+        "new_thread",
+        "deleted_thread",
+        "missing_snapshot",
+        "tampered_snapshot",
+    ] {
+        let f = Fixture::new();
+        let name = format!("local_{SESSION}.json");
+        let mut old = quit_marker_session("old");
+        if condition == "unknown_marker_field" {
+            old["armedWorkAtQuit"]["future"] = true.into();
+        }
+        if condition == "invalid_marker" {
+            old["armedWorkAtQuit"]["cronCount"] = "invalid".into();
+        }
+        fs::write(
+            f.bucket(false).join(&name),
+            serde_json::to_vec(&old).unwrap(),
+        )
+        .unwrap();
+        f.enable();
+        confirm_open(&f, "second");
+        let mut stale = old;
+        stale.as_object_mut().unwrap().remove("armedWorkAtQuit");
+        match condition {
+            "title" => stale["title"] = "external edit".into(),
+            "nested" => stale["future"]["armedWorkAtQuit"] = true.into(),
+            "replaced_marker" => stale["armedWorkAtQuit"] = serde_json::json!({"at": 200}),
+            "new_thread" => fs::write(f.bucket(false).join("external.json"), "{}").unwrap(),
+            _ => (),
+        }
+        fs::write(
+            f.bucket(false).join(&name),
+            serde_json::to_vec(&stale).unwrap(),
+        )
+        .unwrap();
+        if condition == "deleted_thread" {
+            fs::remove_file(f.bucket(false).join(&name)).unwrap();
+        }
+        if matches!(condition, "missing_snapshot" | "tampered_snapshot") {
+            let group = code_group(&f);
+            let incoming = f
+                .provider
+                .app_data
+                .join("native-code-backups")
+                .join(group["generation"].as_str().unwrap())
+                .join("incoming/bucket")
+                .join(&name);
+            if condition == "missing_snapshot" {
+                fs::remove_file(incoming).unwrap();
+            } else {
+                fs::write(incoming, serde_json::to_vec(&stale).unwrap()).unwrap();
+            }
+        }
+        let config = fs::read(f.provider.app_data.join("native-code.toml")).unwrap();
+        let authority = fs::read(f.bucket(true).join(&name)).unwrap();
+        assert!(
+            native_code::before_switch(f.manager.as_ref(), f.provider.as_ref(), "second").is_err(),
+            "{condition}"
+        );
+        assert_eq!(
+            fs::read(f.provider.app_data.join("native-code.toml")).unwrap(),
+            config,
+            "{condition}"
+        );
+        assert_eq!(
+            fs::read(f.bucket(true).join(&name)).unwrap(),
+            authority,
+            "{condition}"
+        );
+    }
+}
+
 #[test]
 fn unknown_external_writer_never_overwrites_confirmed_authority() {
     let f = Fixture::new();
