@@ -25,6 +25,19 @@ fn focus(value: &mut Value) {
     }
 }
 
+fn quit_marker(value: &Value) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.len() == 5
+            && matches!(
+                object.get("exitKind").and_then(Value::as_str),
+                Some("quit" | "update_restart")
+            )
+            && ["at", "cronCount", "durableCronCount", "backgroundTaskCount"]
+                .iter()
+                .all(|key| object.get(*key).is_some_and(|v| v.as_u64().is_some()))
+    })
+}
+
 fn gc(value: &mut Value) {
     if let Some(object) = value
         .get_mut("untrackedDirGc")
@@ -49,6 +62,34 @@ fn max_field(target: &mut Value, other: &Value) -> bool {
 }
 
 impl Store {
+    /// Claude consumes these markers when an updater opens a stale environment.
+    /// Restore only missing, recognized markers in a comparison copy. The
+    /// complete verified snapshot must still match; never merge restart state
+    /// into the authority or ignore a marker that was added or changed.
+    pub(super) fn matches_consumed_quit_markers(&self, baseline: &Store) -> Result<bool> {
+        let mut restored = self.clone();
+        let mut changed = false;
+        for (path, data) in &mut restored.files {
+            if !session(path) {
+                continue;
+            }
+            let Some(prior) = baseline.files.get(path) else {
+                continue;
+            };
+            let mut value = json(data)?;
+            let prior = json(prior)?;
+            if let Some(object) = value.as_object_mut()
+                && !object.contains_key("armedWorkAtQuit")
+                && let Some(marker) = prior.get("armedWorkAtQuit").filter(|v| quit_marker(v))
+            {
+                object.insert("armedWorkAtQuit".into(), marker.clone());
+                *data = serde_json::to_vec(&value)?;
+                changed = true;
+            }
+        }
+        Ok(changed && restored.content_fingerprint()? == baseline.content_fingerprint()?)
+    }
+
     pub(super) fn content_fingerprint(&self) -> Result<String> {
         let mut normalized = self.clone();
         for (path, data) in &mut normalized.files {

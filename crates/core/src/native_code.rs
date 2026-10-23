@@ -397,6 +397,35 @@ fn legacy_baselines(
     ))
 }
 
+/// Permit startup consuming quit markers only against the exact planned store
+/// of this generation. Existing fingerprint semantics and old configurations
+/// remain unchanged. Missing or changed backups cannot establish a baseline.
+fn consumed_quit_markers_only(
+    provider: &dyn PlatformProvider,
+    group: &Group,
+    places: &[Location],
+    index: usize,
+    observed: &Store,
+) -> Result<bool> {
+    if !valid_tag(&group.generation) {
+        return Ok(false);
+    }
+    let root = provider.app_data_dir().join("native-code-backups");
+    safe_fs::reject_symlink(&root)?;
+    let backup = root.join(&group.generation);
+    let selected = backup_store(&backup, "incoming", &places[index])?;
+    // The incoming snapshot predates confirmation of the next launch. Its
+    // original account must be proved by the saved complete fingerprint,
+    // rather than inferred from the current selection or last launch.
+    for from in places {
+        let baseline = selected.for_account(&from.account, &places[index].account)?;
+        if group.fingerprints.get(&places[index].name) == Some(&baseline.fingerprint()) {
+            return observed.matches_consumed_quit_markers(&baseline);
+        }
+    }
+    Ok(false)
+}
+
 fn authority_index(
     provider: &dyn PlatformProvider,
     group: &Group,
@@ -446,6 +475,7 @@ fn authority_index(
                     != stores[index]
                         .for_account(&places[index].account, &place.account)?
                         .content_fingerprint()?
+                && !consumed_quit_markers_only(provider, group, places, i, &stores[i])?
             {
                 return Err(conflict(
                     "an environment outside the last confirmed launch has unknown content changes; quit all writers and explicitly choose a source",
