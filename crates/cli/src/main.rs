@@ -46,6 +46,12 @@ enum Commands {
         abandon: bool,
     },
 
+    /// Automatically return to the last environment after Claude updates.
+    UpdateReturn {
+        #[arg(default_value = "status", value_parser = ["on", "off", "status"])]
+        mode: String,
+    },
+
     /// Manage environments
     Profile {
         #[command(subcommand)]
@@ -187,6 +193,17 @@ fn main() -> anyhow::Result<()> {
                 ),
                 None => println!("No saved launch to recover. Claude remains stopped."),
             }
+        }
+        Commands::UpdateReturn { mode } => {
+            if mode != "status" {
+                csw_core::update_return::set_enabled(&provider.app_data_dir(), mode == "on")?;
+            }
+            let enabled = csw_core::update_return::enabled(&provider.app_data_dir())?;
+            println!(
+                "Automatic return after Claude updates: {}",
+                if enabled { "on" } else { "off" }
+            );
+            println!("Keep Switcher running. Normal launches are unchanged.");
         }
         Commands::UnshareCode => {
             let manager = ProfileManager::new(provider.clone())?;

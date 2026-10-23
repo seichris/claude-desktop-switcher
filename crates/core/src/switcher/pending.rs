@@ -22,6 +22,7 @@ pub struct PendingLaunch {
     pub phase: LaunchPhase,
     pub error: Option<&'static str>,
     pub wait_for_exit: bool,
+    pub automatic_return: bool,
 }
 
 pub enum DesktopState {
@@ -85,6 +86,7 @@ impl Default for LaunchQueue {
                     phase: LaunchPhase::Idle,
                     error: None,
                     wait_for_exit: true,
+                    automatic_return: false,
                 },
                 identity: String::new(),
                 submitted: None,
@@ -144,6 +146,7 @@ impl LaunchQueue {
                 phase: LaunchPhase::Idle,
                 error: None,
                 wait_for_exit: true,
+                automatic_return: false,
             },
             identity: String::new(),
             submitted: None,
@@ -194,6 +197,7 @@ impl LaunchQueue {
             phase: LaunchPhase::Switching,
             error: None,
             wait_for_exit: false,
+            automatic_return: false,
         };
         s.submitted = Some(std::time::Instant::now());
         s.committed_failure = false;
@@ -208,6 +212,47 @@ impl LaunchQueue {
         ops: &dyn LaunchOperations,
     ) -> Result<PendingLaunch, &'static str> {
         self.request_mode(target, ops, false)
+    }
+
+    /// Admit an update return and its normal-quit preparation in one execution
+    /// reservation. Existing requests and changed targets refuse before any
+    /// preparation. The common worker still handles stopped-state handoff.
+    pub fn request_prepared(
+        &self,
+        target: &str,
+        expected_identity: &str,
+        ops: &dyn LaunchOperations,
+        prepare: impl FnOnce() -> Result<(), &'static str>,
+    ) -> Result<PendingLaunch, &'static str> {
+        let _reservation = self.reserve_idle()?;
+        let identity = ops.validate(target)?;
+        if identity != expected_identity {
+            return Err("target_changed");
+        }
+        let mut s = self.state.lock().map_err(|_| "launch_unavailable")?;
+        let request_id = s
+            .status
+            .request_id
+            .checked_add(1)
+            .ok_or("launch_unavailable")?;
+        prepare()?;
+        *s = QueueState {
+            status: PendingLaunch {
+                request_id,
+                target: Some(target.into()),
+                targets: vec![target.into()],
+                phase: LaunchPhase::Waiting,
+                error: None,
+                wait_for_exit: true,
+                automatic_return: true,
+            },
+            identity,
+            submitted: None,
+            committed_failure: false,
+            alongside: false,
+            batch: false,
+        };
+        Ok(s.status.clone())
     }
 
     pub fn request_alongside(
@@ -267,6 +312,7 @@ impl LaunchQueue {
             phase: LaunchPhase::Waiting,
             error: None,
             wait_for_exit: !alongside,
+            automatic_return: false,
         };
         s.identity = identity;
         s.submitted = None;

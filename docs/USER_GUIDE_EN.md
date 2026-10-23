@@ -103,7 +103,7 @@ Select the next environment and press its launch button, or choose it from the m
 
 ![Launch waiting for manual quit](../website/assets/screen_pending_launch.png)
 
-- CSW does not detect completed tasks, answer questions, request quit, press buttons in Claude, or force quit. You decide when to quit. No Accessibility permission, hook, extra CLI sign-in or network access is needed.
+- For manual launch requests, CSW does not detect completed tasks, answer questions, request quit, press buttons in Claude, or force quit. You decide when to quit. No Accessibility permission, hook, extra CLI sign-in or network access is needed.
 - Cancel while the status is waiting to prevent the launch. To choose a different target, cancel the existing reservation first. Repeating a request for the same target keeps one reservation. Once synchronization and launch have started, cancellation is unavailable.
 - The reservation exists only in CSW's memory. Quitting or restarting CSW clears it; it does not reopen an old reservation at startup.
 - While waiting, an unavailable process check keeps the reservation cancelable and shows a rechecking notice. CSW checks again every second without launching; it continues automatically once process state is verified. This recovery requires local version `0.24.6-local.7` or later. A changed or missing target, or a failure inside the synchronization and launch path, still stops the request without an automatic retry. Check that notice before making a new request. After launch is submitted, CSW keeps the reservation until it observes the target running. If startup is uncertain, it shows an error while keeping that reservation: cancellation, replacement and another launch are blocked to avoid duplicates. Observation continues, so a late startup can complete the reservation. Check Claude’s state before restarting CSW; restarting clears this memory-only reservation, but does not undo any launch or the existing Code-sharing safeguards.
@@ -248,6 +248,21 @@ Yes. Press **"Check the current environment"** in the menu bar icon's menu: CSW 
 
 **Q. Can an update to Claude Desktop take me out of my environment?**
 Yes, it can happen. The automatic relaunch after an update does not go through CSW, so the reopened Claude runs on Existing Claude's data. The window looks the same, but the "In use" marker in CSW moves to Existing Claude, and if CSW is running, the settings window shows a notice. To continue in your environment, quit Claude and press "Launch this environment" again. With complete local Code sharing, clearing recognized quit/resume markers in an otherwise unchanged stopped store is accepted only against the verified snapshot from the last synchronization. The last confirmed environment remains authoritative. Any other history changes still require choosing an explicit source.
+
+
+To return automatically after an update, run `csw update-return on` with this
+fork's local.13 or later app and CLI, and keep Switcher running. It records the
+named environment actually running alone. If that environment closes, Claude's
+installed executable changes, and a new instance without an environment argument opens within 90
+seconds, Switcher requests a normal quit of that exact instance and returns through
+the usual history handoff. It checks the environment and process again before
+quitting. It does not force quit. If Claude declines the quit request, recovery stops without reserving a launch.
+If it accepts but defers exit, wait or cancel the pending launch. Real history conflicts still need an explicit source choice.
+Normal Dock launches with an unchanged app are unaffected. An intentional Existing
+Claude launch immediately after replacing the app can meet the same conditions.
+Switcher must observe the transition; it cannot recover an update that happened
+while it was closed or one that does not restart Claude. Check with
+`csw update-return status`; disable with `csw update-return off`.
 
 **Q. Reopening every environment by hand after each update is tedious.**
 Applying an update requires quitting every running Claude (the app's updater waits for them all to quit before it swaps the app). So CSW remembers the environments that were open together the last time you quit them all, and a single "Reopen" in the settings window banner opens them again. Environments already running are skipped automatically. If a shared environment cannot run alongside another Claude, only that one is flagged with "quit the Claude that is running" first. This "Reopen" action launches only when you press its button. A launch you reserved separately follows the manual-quit workflow above.

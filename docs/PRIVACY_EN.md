@@ -82,7 +82,7 @@ The last-checked time is the saved observation's time. A reading over 30 minutes
 
 ## Waiting for manual quit before launching
 
-This fork's local app can hold one requested environment launch in memory while Claude Desktop is running. CSW never requests quit, sends termination signals, presses Claude's buttons or force quits. You finish the work and pending answers yourself, then quit Claude normally. Closing a window may not exit the app. No Accessibility permission or hook is used.
+This fork's local app can hold one requested environment launch in memory while Claude Desktop is running. Manual launch requests never request quit, send termination signals, press Claude's buttons or force quit. You finish the work and pending answers yourself, then quit Claude normally. Closing a window may not exit the app. No Accessibility permission or hook is used.
 
 The reservation contains the target environment, request identifier, state and a snapshot of CSW’s own environment metadata for revalidation. It is not written to a new file or browser storage, and quitting or restarting CSW clears it. Cancel is available only while waiting; after synchronization and launch begin, CSW cannot undo them. The target and stopped process state are revalidated before launch. Failure to inspect processes before that point prevents launching. After a launch request is sent, CSW observes startup without repeating it if inspection fails. If startup cannot be confirmed, an error is shown while the reservation stays held: cancellation, replacement and another launch remain blocked. A target that appears later completes the reservation. Restarting CSW clears the memory-only reservation, but cannot undo a submitted launch or clear the existing Code-sharing launch reservation.
 
@@ -179,3 +179,19 @@ Every release from v0.19.0 onward ships with a CycloneDX-format list of all libr
 ## About this document
 
 CSW is open source and its entire source code is public. If anything in this document disagrees with the implementation, that is a bug: please tell us on [GitHub Issues](https://github.com/matsumotory/claude-desktop-switcher/issues).
+
+## Optional automatic return after Claude updates
+
+`csw update-return on` enables a local setting in
+`~/.context-switcher-claude/update-return.toml`; `off` disables it and `status`
+reads it. The file contains only an enabled boolean, uses mode 0600, and is
+written atomically through `.update-return-<pid>-<nonce>` in the same directory. While enabled, the existing process watcher also reads file
+metadata of `/Applications/Claude.app/Contents/MacOS/Claude` to recognize an
+installed update. The prior sole environment and its profile identity remain in
+memory. After its exit and a recent new Claude process without an environment argument, CSW
+revalidates the exact sole PID, executable metadata and environment identity, then
+requests normal quit with the public `NSRunningApplication.terminate` API. The
+normal stopped-state history handoff and launch queue follow. CSW does not force
+quit, read task contents, request Accessibility permission or make a network
+request. This exception applies only when the setting is enabled and the observed
+update conditions match. Normal launches retain their manual-quit behavior.

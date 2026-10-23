@@ -250,6 +250,10 @@
             </div>
             <div class="faq-grid">
                 <div class="faq-item">
+                    <p class="faq-q">Claudeの更新後に元の環境へ自動で戻せますか？</p>
+                    <p class="faq-a">このforkのローカル版local.13以降のアプリとCLIで<code>csw update-return on</code>を実行し、CSWを起動したままにしてください。元環境の終了、アプリの入れ替え、90秒以内の新しい既存のClaudeを確認すると、その対象に通常終了を要求し、履歴を引き継いで元の環境を開き直します。履歴が競合した場合は停止します。アプリが変わっていない通常の起動には介入しません。無効化は<code>csw update-return off</code>です。</p>
+                </div>
+                <div class="faq-item">
                     <p class="faq-q">「共有」「分離」は何に対してですか？</p>
                     <p class="faq-a">常に、あなたが普段使っている既存のClaudeに対してです。既存のClaudeと同じものを使うことを共有、この環境専用に新しく持つことを分離と呼び、項目ごとにどちらかを選びます。どう選んでも、アカウントは常に環境ごとに分かれます。</p>
                 </div>
@@ -283,7 +287,7 @@
                 </div>
                 <div class="faq-item">
                     <p class="faq-q">Claudeを終了する前に、次の環境を選べますか？</p>
-                    <p class="faq-a">このフォークのローカルアプリでは可能です。別のClaude Desktopが実行中に対象の起動ボタンを押すと、予約先とキャンセルを表示します。作業と質問への回答を終え、すべてのClaude DesktopをCmd+Qで通常終了してください。ウィンドウを閉じただけでは終了しない場合があります。CSWが通常の停止状態での同期と起動を行います。CSWは終了要求や作業の完了判定を行わず、Accessibilityの許可、追加のCLIログイン、ネットワーク接続も不要です。予約は1つだけで、別の環境を選ぶ前にキャンセルします。CSWを再起動すると予約は消えます。上流の配布版には含まれません。<a href="https://github.com/seichris/claude-desktop-switcher/blob/main/docs/USER_GUIDE.md#claudeを終了してから予約した環境を開く" target="_blank" rel="noopener">手動終了後の起動のガイド</a>を参照してください。</p>
+                    <p class="faq-a">このフォークのローカルアプリでは可能です。別のClaude Desktopが実行中に対象の起動ボタンを押すと、予約先とキャンセルを表示します。作業と質問への回答を終え、すべてのClaude DesktopをCmd+Qで通常終了してください。ウィンドウを閉じただけでは終了しない場合があります。CSWが通常の停止状態での同期と起動を行います。手動の起動予約ではCSWは終了要求や作業の完了判定を行わず、Accessibilityの許可、追加のCLIログイン、ネットワーク接続も不要です。予約は1つだけで、別の環境を選ぶ前にキャンセルします。CSWを再起動すると予約は消えます。上流の配布版には含まれません。<a href="https://github.com/seichris/claude-desktop-switcher/blob/main/docs/USER_GUIDE.md#claudeを終了してから予約した環境を開く" target="_blank" rel="noopener">手動終了後の起動のガイド</a>を参照してください。</p>
                 </div>
                 <div class="faq-item">
                     <p class="faq-q">複数の環境を同時に開けますか？</p>

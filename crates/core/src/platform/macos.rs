@@ -210,6 +210,44 @@ impl PlatformProvider for MacOsProvider {
         }
     }
 
+    fn desktop_app_revision(&self) -> Result<String> {
+        use std::os::unix::fs::MetadataExt;
+        let path = self.claude_desktop_app_path().join("Contents/MacOS/Claude");
+        let meta = std::fs::symlink_metadata(path)?;
+        if !meta.is_file() {
+            return Err(CswError::ProcessInspection);
+        }
+        Ok(format!(
+            "{}:{}:{}:{}:{}",
+            meta.dev(),
+            meta.ino(),
+            meta.len(),
+            meta.mtime(),
+            meta.mtime_nsec()
+        ))
+    }
+
+    fn quit_update_restart(&self, pid: u32, revision: &str) -> Result<()> {
+        use objc2_app_kit::NSRunningApplication;
+        let processes = self.running_desktop_processes()?;
+        if pid == 0
+            || pid > i32::MAX as u32
+            || !self.is_claude_desktop_running()?
+            || self.desktop_app_revision()? != revision
+            || !matches!(processes.as_slice(), [(candidate, args)] if *candidate == pid && !args.contains("--user-data-dir"))
+        {
+            return Err(CswError::ProcessInspection);
+        }
+        let app = NSRunningApplication::runningApplicationWithProcessIdentifier(pid as i32)
+            .ok_or(CswError::ProcessInspection)?;
+        // Normal application termination may be refused or deferred. The
+        // existing queue waits for verified process exit; never force it.
+        if !app.terminate() {
+            return Err(CswError::Other("Claude declined normal quit".into()));
+        }
+        Ok(())
+    }
+
     fn frontmost_app(&self) -> Result<super::FrontmostApp> {
         // Only the application's PID is read; window titles and contents are
         // never touched. Called from an explicit user action (tray item).

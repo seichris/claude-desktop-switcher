@@ -81,6 +81,18 @@ pub trait PlatformProvider: Send + Sync {
     /// action (the "前面に表示" button), never polled.
     fn activate_pid(&self, pid: u32) -> Result<bool>;
 
+    /// Identity of the installed Claude executable, without opening app data.
+    fn desktop_app_revision(&self) -> Result<String> {
+        Err(crate::error::CswError::ProcessInspection)
+    }
+
+    /// Request normal quit of the exact sole updater-opened default instance.
+    /// Revalidate the executable revision, PID and arguments before requesting.
+    /// A refusal is an error; implementations must never force termination.
+    fn quit_update_restart(&self, _pid: u32, _revision: &str) -> Result<()> {
+        Err(crate::error::CswError::ProcessInspection)
+    }
+
     /// What owns the frontmost window right now. Read on demand only (the
     /// tray's "which environment is this?" action), never polled: reading the
     /// frontmost application is a privacy-relevant lookup and stays tied to an
