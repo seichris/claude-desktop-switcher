@@ -118,11 +118,19 @@ impl UpdateReturnWatch {
             && target != "default"
             && args.contains("--user-data-dir=")
         {
+            // The process snapshot can straddle updater replacement. Keep the
+            // executable revision first associated with this same process.
+            let revision = self
+                .observed
+                .as_ref()
+                .filter(|prior| prior.pid == *pid && prior.target == target)
+                .map(|prior| prior.revision.clone())
+                .unwrap_or_else(|| revision.into());
             self.observed = Some(Observed {
                 target: target.into(),
                 identity: identity.into(),
                 pid: *pid,
-                revision: revision.into(),
+                revision,
                 at: now,
             });
             return None;

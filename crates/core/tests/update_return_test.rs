@@ -234,3 +234,32 @@ fn preference_is_private_persistent_and_invalid_files_cannot_enable_it() {
     assert!(set_enabled(&root, false).is_err());
     assert_eq!(std::fs::read_to_string(external).unwrap(), "enabled = true");
 }
+
+#[test]
+fn updater_replacement_between_process_and_file_observations_keeps_the_old_revision() {
+    let mut watch = UpdateReturnWatch::default();
+    let now = Instant::now();
+    watch.observe(
+        now,
+        &[(10, "Claude --user-data-dir=/named".into())],
+        Some(("Chris", "identity")),
+        "old",
+    );
+    // ps can capture the old process just before it exits, then file metadata
+    // can see the updater's replacement. It is still the same observed PID.
+    watch.observe(
+        now + Duration::from_secs(3),
+        &[(10, "Claude --user-data-dir=/named".into())],
+        Some(("Chris", "identity")),
+        "new",
+    );
+    let plan = watch
+        .observe(
+            now + Duration::from_secs(6),
+            &[(20, "Claude".into())],
+            None,
+            "new",
+        )
+        .unwrap();
+    assert_eq!(plan.target, "Chris");
+}

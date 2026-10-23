@@ -189,7 +189,9 @@ written atomically through `.update-return-<pid>-<nonce>` in the same directory.
 metadata of `/Applications/Claude.app/Contents/MacOS/Claude` to recognize an
 installed update. The prior sole environment and its profile identity remain in
 memory. After its exit and a recent new Claude process without an environment argument, CSW
-revalidates the exact sole PID, executable metadata and environment identity, then
+revalidates the exact sole PID, executable metadata and environment identity, and
+checks that both the kernel and native application object identify the installed
+executable path, then
 requests normal quit with the public `NSRunningApplication.terminate` API. The
 normal stopped-state history handoff and launch queue follow. CSW does not force
 quit, read task contents, request Accessibility permission or make a network

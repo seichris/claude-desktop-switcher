@@ -25,7 +25,7 @@ node scripts/appshot/gen-screenshots.mjs
 gh workflow run appshot.yml -f branch=<PRのブランチ>
 ```
 
-ワークフローは18枚を撮り直し、差分があればbotのコミットとしてそのブランチへpushする。botがpushすると、PRのCIのrunは承認待ちで止まる。その後に空のコミットをpushして、必須チェックを走らせる。
+ワークフローは20枚を撮り直し、差分があればbotのコミットとしてそのブランチへpushする。botがpushすると、PRのCIのrunは承認待ちで止まる。その後に空のコミットをpushして、必須チェックを走らせる。
 
 手元のMacで撮った画像は、出荷する画像に使わない。2026年10月に手元のMacのChrome 154で撮ると、ChromeはコードをOsaka-Monoで描いた。UIはコードの書体に4つの候補を指定している。このChromeは、`ui-monospace`と`SF Mono`と`JetBrains Mono`を解決できず、最後の総称の`monospace`に落ちた。そのため手元の画像では、ランナーの画像よりコードの字が小さく見え、字の形も違う。手元で撮るのは、変更が画面にどう写るかを下見するときだけにする。
 
